@@ -70,24 +70,20 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		}
 
 		// Check allowlist authorization
-		if !m.allowlist.IsAllowed(identity.Cluster, identity.Namespace, identity.ServiceAccount) {
+		if !m.allowlist.IsAllowed(identity.Namespace, identity.ServiceAccount) {
 			m.logger.Warn("Authorization failed: not in allowlist",
-				"cluster", identity.Cluster,
-				"namespace", identity.Namespace,
-				"serviceAccount", identity.ServiceAccount,
+				"identity", fmt.Sprintf("%s/%s", identity.Namespace, identity.ServiceAccount),
 				"path", r.URL.Path,
 				"method", r.Method,
 			)
-			m.jsonError(w, fmt.Sprintf("forbidden: %s/%s/%s not in allowlist",
-				identity.Cluster, identity.Namespace, identity.ServiceAccount), http.StatusForbidden)
+			m.jsonError(w, fmt.Sprintf("forbidden: %s/%s not in allowlist",
+				identity.Namespace, identity.ServiceAccount), http.StatusForbidden)
 			return
 		}
 
 		// Log successful authentication
 		m.logger.Info("Request authenticated",
-			"cluster", identity.Cluster,
-			"namespace", identity.Namespace,
-			"serviceAccount", identity.ServiceAccount,
+			"identity", fmt.Sprintf("%s/%s", identity.Namespace, identity.ServiceAccount),
 			"path", r.URL.Path,
 			"method", r.Method,
 		)

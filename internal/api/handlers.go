@@ -35,8 +35,7 @@ func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, err
 	if cfg.Auth.Enabled {
 		// Create auth client
 		authClient := auth.NewClient(
-			cfg.Auth.ServiceURL,
-			cfg.Auth.ClusterName,
+			cfg.Auth.K8sAPIEndpoint,
 			time.Duration(cfg.Auth.Timeout)*time.Millisecond,
 			logger,
 		)
@@ -60,8 +59,7 @@ func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, err
 		})
 
 		logger.Info("Authentication enabled",
-			"serviceURL", cfg.Auth.ServiceURL,
-			"cluster", cfg.Auth.ClusterName,
+			"k8sAPIEndpoint", cfg.Auth.K8sAPIEndpoint,
 			"allowlistFile", cfg.Auth.AllowlistFile,
 		)
 	}

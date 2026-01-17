@@ -66,9 +66,9 @@ func (a *Allowlist) load() error {
 	return nil
 }
 
-// IsAllowed checks if the given cluster/namespace/serviceAccount is in the allowlist
-func (a *Allowlist) IsAllowed(cluster, namespace, serviceAccount string) bool {
-	key := fmt.Sprintf("%s/%s/%s", cluster, namespace, serviceAccount)
+// IsAllowed checks if the given namespace/serviceAccount is in the allowlist
+func (a *Allowlist) IsAllowed(namespace, serviceAccount string) bool {
+	key := fmt.Sprintf("%s/%s", namespace, serviceAccount)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.entries[key]

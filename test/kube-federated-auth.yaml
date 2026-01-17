@@ -10,12 +10,8 @@ metadata:
   namespace: kube-federated-auth
 data:
   clusters.yaml: |
-    renewal:
-      interval: "1h"
-      token_duration: "168h"
-      renew_before: "48h"
     clusters:
-      minikube:
+      local:
         issuer: "https://kubernetes.default.svc.cluster.local"
         api_server: "https://kubernetes.default.svc.cluster.local"
         ca_cert: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -67,7 +63,7 @@ spec:
       serviceAccountName: kube-federated-auth
       containers:
       - name: kube-federated-auth
-        image: rophy/kube-federated-auth:0.0.1
+        image: rophy/kube-federated-auth:2.0.0
         ports:
         - containerPort: 8080
         env:

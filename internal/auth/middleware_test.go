@@ -19,8 +19,8 @@ func setupTestMiddleware(t *testing.T, authServerHandler http.HandlerFunc) (*Mid
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "allowlist.yaml")
 	content := `allowlist:
-  - test-cluster/test-ns/test-sa
-  - test-cluster/allowed-ns/allowed-sa
+  - test-ns/test-sa
+  - allowed-ns/allowed-sa
 `
 	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write allowlist: %v", err)
@@ -33,7 +33,7 @@ func setupTestMiddleware(t *testing.T, authServerHandler http.HandlerFunc) (*Mid
 	}
 
 	// Create client
-	client := NewClient(authServer.URL, "test-cluster", 5*time.Second, testLogger())
+	client := NewClient(authServer.URL, 5*time.Second, testLogger())
 
 	// Create middleware
 	middleware := NewMiddleware(client, allowlist, testLogger(), []string{
@@ -128,12 +128,14 @@ func TestMiddleware_InvalidAuthHeaderFormat(t *testing.T) {
 func TestMiddleware_ValidTokenAndInAllowlist(t *testing.T) {
 	middleware, _, cleanup := setupTestMiddleware(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ValidateResponse{
-			KubernetesIO: &KubernetesMetadata{
-				Namespace: "test-ns",
-				ServiceAccount: &ServiceAccountInfo{
-					Name: "test-sa",
-					UID:  "test-uid",
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "system:serviceaccount:test-ns:test-sa",
+					UID:      "test-uid",
 				},
 			},
 		})
@@ -177,12 +179,14 @@ func TestMiddleware_ValidTokenAndInAllowlist(t *testing.T) {
 func TestMiddleware_ValidTokenButNotInAllowlist(t *testing.T) {
 	middleware, _, cleanup := setupTestMiddleware(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ValidateResponse{
-			KubernetesIO: &KubernetesMetadata{
-				Namespace: "unauthorized-ns",
-				ServiceAccount: &ServiceAccountInfo{
-					Name: "unauthorized-sa",
-					UID:  "test-uid",
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "system:serviceaccount:unauthorized-ns:unauthorized-sa",
+					UID:      "test-uid",
 				},
 			},
 		})
@@ -205,14 +209,22 @@ func TestMiddleware_ValidTokenButNotInAllowlist(t *testing.T) {
 
 	var resp map[string]string
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["error"] != "forbidden: test-cluster/unauthorized-ns/unauthorized-sa not in allowlist" {
+	if resp["error"] != "forbidden: unauthorized-ns/unauthorized-sa not in allowlist" {
 		t.Errorf("unexpected error message: %s", resp["error"])
 	}
 }
 
 func TestMiddleware_InvalidToken(t *testing.T) {
 	middleware, _, cleanup := setupTestMiddleware(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: false,
+				Error:         "invalid token",
+			},
+		})
 	})
 	defer cleanup()
 

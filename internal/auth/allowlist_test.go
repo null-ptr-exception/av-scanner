@@ -13,9 +13,9 @@ func TestAllowlist_LoadAndCheck(t *testing.T) {
 	tmpFile := filepath.Join(tmpDir, "allowlist.yaml")
 
 	content := `allowlist:
-  - prod/ns1/sa1
-  - prod/ns2/sa2
-  - staging/ns1/sa1
+  - ns1/sa1
+  - ns2/sa2
+  - kube-system/default
 `
 	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
@@ -27,24 +27,22 @@ func TestAllowlist_LoadAndCheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		cluster        string
 		namespace      string
 		serviceAccount string
 		expected       bool
 	}{
-		{"prod", "ns1", "sa1", true},
-		{"prod", "ns2", "sa2", true},
-		{"staging", "ns1", "sa1", true},
-		{"prod", "ns1", "sa2", false},
-		{"dev", "ns1", "sa1", false},
-		{"prod", "ns3", "sa1", false},
+		{"ns1", "sa1", true},
+		{"ns2", "sa2", true},
+		{"kube-system", "default", true},
+		{"ns1", "sa2", false},
+		{"ns3", "sa1", false},
 	}
 
 	for _, tt := range tests {
-		result := allowlist.IsAllowed(tt.cluster, tt.namespace, tt.serviceAccount)
+		result := allowlist.IsAllowed(tt.namespace, tt.serviceAccount)
 		if result != tt.expected {
-			t.Errorf("IsAllowed(%s, %s, %s) = %v, expected %v",
-				tt.cluster, tt.namespace, tt.serviceAccount, result, tt.expected)
+			t.Errorf("IsAllowed(%s, %s) = %v, expected %v",
+				tt.namespace, tt.serviceAccount, result, tt.expected)
 		}
 	}
 }
@@ -63,7 +61,7 @@ func TestAllowlist_EmptyFile(t *testing.T) {
 		t.Fatalf("failed to create allowlist: %v", err)
 	}
 
-	if allowlist.IsAllowed("prod", "ns1", "sa1") {
+	if allowlist.IsAllowed("ns1", "sa1") {
 		t.Error("expected false for empty allowlist")
 	}
 }
@@ -96,7 +94,7 @@ func TestAllowlist_Reload(t *testing.T) {
 
 	// Initial content
 	content := `allowlist:
-  - prod/ns1/sa1
+  - ns1/sa1
 `
 	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
@@ -114,17 +112,17 @@ func TestAllowlist_Reload(t *testing.T) {
 	defer allowlist.Close()
 
 	// Verify initial state
-	if !allowlist.IsAllowed("prod", "ns1", "sa1") {
-		t.Error("expected prod/ns1/sa1 to be allowed initially")
+	if !allowlist.IsAllowed("ns1", "sa1") {
+		t.Error("expected ns1/sa1 to be allowed initially")
 	}
-	if allowlist.IsAllowed("prod", "ns2", "sa2") {
-		t.Error("expected prod/ns2/sa2 to NOT be allowed initially")
+	if allowlist.IsAllowed("ns2", "sa2") {
+		t.Error("expected ns2/sa2 to NOT be allowed initially")
 	}
 
 	// Update file
 	newContent := `allowlist:
-  - prod/ns1/sa1
-  - prod/ns2/sa2
+  - ns1/sa1
+  - ns2/sa2
 `
 	if err := os.WriteFile(tmpFile, []byte(newContent), 0644); err != nil {
 		t.Fatalf("failed to update temp file: %v", err)
@@ -134,10 +132,10 @@ func TestAllowlist_Reload(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify new state
-	if !allowlist.IsAllowed("prod", "ns1", "sa1") {
-		t.Error("expected prod/ns1/sa1 to be allowed after reload")
+	if !allowlist.IsAllowed("ns1", "sa1") {
+		t.Error("expected ns1/sa1 to be allowed after reload")
 	}
-	if !allowlist.IsAllowed("prod", "ns2", "sa2") {
-		t.Error("expected prod/ns2/sa2 to be allowed after reload")
+	if !allowlist.IsAllowed("ns2", "sa2") {
+		t.Error("expected ns2/sa2 to be allowed after reload")
 	}
 }

@@ -13,18 +13,42 @@ import (
 	"testing"
 )
 
-func authServiceURL() string {
-	if url := os.Getenv("AUTH_SERVICE_URL"); url != "" {
+const tokenReviewPath = "/apis/authentication.k8s.io/v1/tokenreviews"
+
+func k8sAPIEndpoint() string {
+	if url := os.Getenv("K8S_API_ENDPOINT"); url != "" {
 		return url
 	}
 	return "http://127.0.0.1:8082"
 }
 
-func authClusterName() string {
-	if cluster := os.Getenv("AUTH_CLUSTER_NAME"); cluster != "" {
-		return cluster
-	}
-	return "minikube"
+// TokenReview types for testing
+type tokenReviewRequest struct {
+	APIVersion string              `json:"apiVersion"`
+	Kind       string              `json:"kind"`
+	Spec       tokenReviewSpec     `json:"spec"`
+}
+
+type tokenReviewSpec struct {
+	Token string `json:"token"`
+}
+
+type tokenReviewResponse struct {
+	APIVersion string              `json:"apiVersion"`
+	Kind       string              `json:"kind"`
+	Status     tokenReviewStatus   `json:"status"`
+}
+
+type tokenReviewStatus struct {
+	Authenticated bool      `json:"authenticated"`
+	User          *userInfo `json:"user,omitempty"`
+	Error         string    `json:"error,omitempty"`
+}
+
+type userInfo struct {
+	Username string   `json:"username"`
+	UID      string   `json:"uid,omitempty"`
+	Groups   []string `json:"groups,omitempty"`
 }
 
 // getServiceAccountToken creates a token for the given namespace/serviceaccount
@@ -45,16 +69,19 @@ func getServiceAccountToken(t *testing.T, namespace, serviceAccount string) stri
 	return strings.TrimSpace(string(output))
 }
 
-// TestAuthService_ValidateEndpoint tests that kube-federated-auth is working
-func TestAuthService_ValidateEndpoint(t *testing.T) {
+// TestAuthService_TokenReviewEndpoint tests that kube-federated-auth TokenReview API is working
+func TestAuthService_TokenReviewEndpoint(t *testing.T) {
 	token := getServiceAccountToken(t, "test-client", "scanner-client")
 
-	reqBody, _ := json.Marshal(map[string]string{
-		"token":   token,
-		"cluster": authClusterName(),
+	reqBody, _ := json.Marshal(tokenReviewRequest{
+		APIVersion: "authentication.k8s.io/v1",
+		Kind:       "TokenReview",
+		Spec: tokenReviewSpec{
+			Token: token,
+		},
 	})
 
-	resp, err := http.Post(authServiceURL()+"/validate", "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(k8sAPIEndpoint()+tokenReviewPath, "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		t.Fatalf("failed to call auth service: %v", err)
 	}
@@ -65,46 +92,55 @@ func TestAuthService_ValidateEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
 	}
 
-	var result map[string]interface{}
+	var result tokenReviewResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		t.Fatalf("failed to unmarshal response: %v, body: %s", err, body)
 	}
 
-	kubeInfo, ok := result["kubernetes.io"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("kubernetes.io field missing or invalid type, response: %s", body)
+	if !result.Status.Authenticated {
+		t.Fatalf("expected authenticated=true, got false, error: %s", result.Status.Error)
 	}
 
-	if kubeInfo["namespace"] != "test-client" {
-		t.Errorf("expected namespace 'test-client', got %v", kubeInfo["namespace"])
+	if result.Status.User == nil {
+		t.Fatal("expected user info in response")
 	}
 
-	saInfo, ok := kubeInfo["serviceaccount"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("serviceaccount field missing or invalid type")
-	}
-
-	if saInfo["name"] != "scanner-client" {
-		t.Errorf("expected serviceAccount 'scanner-client', got %v", saInfo["name"])
+	// Username format: system:serviceaccount:namespace:name
+	expectedUsername := "system:serviceaccount:test-client:scanner-client"
+	if result.Status.User.Username != expectedUsername {
+		t.Errorf("expected username '%s', got '%s'", expectedUsername, result.Status.User.Username)
 	}
 }
 
 // TestAuthService_InvalidToken tests that invalid tokens are rejected
 func TestAuthService_InvalidToken(t *testing.T) {
-	reqBody, _ := json.Marshal(map[string]string{
-		"token":   "invalid-token",
-		"cluster": authClusterName(),
+	reqBody, _ := json.Marshal(tokenReviewRequest{
+		APIVersion: "authentication.k8s.io/v1",
+		Kind:       "TokenReview",
+		Spec: tokenReviewSpec{
+			Token: "invalid-token",
+		},
 	})
 
-	resp, err := http.Post(authServiceURL()+"/validate", "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(k8sAPIEndpoint()+tokenReviewPath, "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		t.Fatalf("failed to call auth service: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// kube-federated-auth returns 500 for validation errors
-	if resp.StatusCode == http.StatusOK {
-		t.Fatal("expected non-200 status for invalid token")
+	body, _ := io.ReadAll(resp.Body)
+	// TokenReview API returns 200 with authenticated=false for invalid tokens
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result tokenReviewResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v, body: %s", err, body)
+	}
+
+	if result.Status.Authenticated {
+		t.Error("expected authenticated=false for invalid token")
 	}
 }
 

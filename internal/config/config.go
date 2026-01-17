@@ -24,11 +24,10 @@ type DriverConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled       bool
-	ServiceURL    string // kube-federated-auth service URL
-	ClusterName   string // cluster name for token validation
-	Timeout       int    // milliseconds
-	AllowlistFile string // path to allowlist YAML file
+	Enabled        bool
+	K8sAPIEndpoint string // Kubernetes API endpoint for TokenReview
+	Timeout        int    // milliseconds
+	AllowlistFile  string // path to allowlist YAML file
 }
 
 type Config struct {
@@ -69,11 +68,10 @@ func Load() (*Config, error) {
 			},
 		},
 		Auth: AuthConfig{
-			Enabled:       getEnvBool("AUTH_ENABLED", false),
-			ServiceURL:    getEnv("AUTH_SERVICE_URL", ""),
-			ClusterName:   getEnv("AUTH_CLUSTER_NAME", "default"),
-			Timeout:       getEnvInt("AUTH_TIMEOUT", 5000),
-			AllowlistFile: getEnv("AUTH_ALLOWLIST_FILE", "/etc/av-scanner/allowlist.yaml"),
+			Enabled:        getEnvBool("AUTH_ENABLED", false),
+			K8sAPIEndpoint: getEnv("K8S_API_ENDPOINT", ""),
+			Timeout:        getEnvInt("K8S_AUTH_TIMEOUT", 5000),
+			AllowlistFile:  getEnv("AUTH_ALLOWLIST_FILE", "/etc/av-scanner/allowlist.yaml"),
 		},
 	}
 
@@ -95,8 +93,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid max file size: %d", c.MaxFileSize)
 	}
 	if c.Auth.Enabled {
-		if c.Auth.ServiceURL == "" {
-			return fmt.Errorf("AUTH_SERVICE_URL is required when AUTH_ENABLED=true")
+		if c.Auth.K8sAPIEndpoint == "" {
+			return fmt.Errorf("K8S_API_ENDPOINT is required when AUTH_ENABLED=true")
 		}
 		if c.Auth.Timeout < 1 {
 			return fmt.Errorf("invalid auth timeout: %d", c.Auth.Timeout)

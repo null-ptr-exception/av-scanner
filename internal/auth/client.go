@@ -8,37 +8,46 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// ValidateRequest is the request body for kube-federated-auth /validate endpoint
-type ValidateRequest struct {
-	Token   string `json:"token"`
-	Cluster string `json:"cluster"`
+// tokenReviewPath is the Kubernetes TokenReview API path
+const tokenReviewPath = "/apis/authentication.k8s.io/v1/tokenreviews"
+
+// TokenReviewRequest is a Kubernetes TokenReview request
+type TokenReviewRequest struct {
+	APIVersion string          `json:"apiVersion"`
+	Kind       string          `json:"kind"`
+	Spec       TokenReviewSpec `json:"spec"`
 }
 
-// ValidateResponse is the success response from kube-federated-auth /validate endpoint
-// On HTTP 200, it returns decoded JWT claims with Kubernetes metadata
-type ValidateResponse struct {
-	KubernetesIO *KubernetesMetadata `json:"kubernetes.io,omitempty"`
+// TokenReviewSpec contains the token to be reviewed
+type TokenReviewSpec struct {
+	Token     string   `json:"token"`
+	Audiences []string `json:"audiences,omitempty"`
 }
 
-// KubernetesMetadata contains the Kubernetes-specific claims from the token
-type KubernetesMetadata struct {
-	Namespace      string                `json:"namespace"`
-	ServiceAccount *ServiceAccountInfo   `json:"serviceaccount,omitempty"`
+// TokenReviewResponse is a Kubernetes TokenReview response
+type TokenReviewResponse struct {
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Status     TokenReviewStatus `json:"status"`
 }
 
-// ServiceAccountInfo contains service account details from the token
-type ServiceAccountInfo struct {
-	Name string `json:"name"`
-	UID  string `json:"uid"`
+// TokenReviewStatus contains the result of the token review
+type TokenReviewStatus struct {
+	Authenticated bool      `json:"authenticated"`
+	User          *UserInfo `json:"user,omitempty"`
+	Error         string    `json:"error,omitempty"`
 }
 
-// ErrorResponse is the error response from kube-federated-auth /validate endpoint
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
+// UserInfo contains information about the authenticated user
+type UserInfo struct {
+	Username string              `json:"username"`
+	UID      string              `json:"uid"`
+	Groups   []string            `json:"groups,omitempty"`
+	Extra    map[string][]string `json:"extra,omitempty"`
 }
 
 // CallerIdentity represents the authenticated caller information
@@ -46,22 +55,19 @@ type CallerIdentity struct {
 	Namespace      string
 	ServiceAccount string
 	UID            string
-	Cluster        string
 }
 
-// Client handles authentication with kube-federated-auth service
+// Client handles authentication via Kubernetes TokenReview API
 type Client struct {
 	baseURL    string
-	cluster    string
 	httpClient *http.Client
 	logger     *slog.Logger
 }
 
 // NewClient creates a new auth client
-func NewClient(baseURL, cluster string, timeout time.Duration, logger *slog.Logger) *Client {
+func NewClient(baseURL string, timeout time.Duration, logger *slog.Logger) *Client {
 	return &Client{
 		baseURL: baseURL,
-		cluster: cluster,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -69,11 +75,14 @@ func NewClient(baseURL, cluster string, timeout time.Duration, logger *slog.Logg
 	}
 }
 
-// Validate validates a token against kube-federated-auth
+// Validate validates a token via Kubernetes TokenReview API
 func (c *Client) Validate(ctx context.Context, token string) (*CallerIdentity, error) {
-	reqBody := ValidateRequest{
-		Token:   token,
-		Cluster: c.cluster,
+	reqBody := TokenReviewRequest{
+		APIVersion: "authentication.k8s.io/v1",
+		Kind:       "TokenReview",
+		Spec: TokenReviewSpec{
+			Token: token,
+		},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -81,7 +90,7 @@ func (c *Client) Validate(ctx context.Context, token string) (*CallerIdentity, e
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/validate", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+tokenReviewPath, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -93,34 +102,7 @@ func (c *Client) Validate(ctx context.Context, token string) (*CallerIdentity, e
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-		// HTTP 200 means token is valid, response contains decoded JWT claims
-		var validateResp ValidateResponse
-		if err := json.NewDecoder(resp.Body).Decode(&validateResp); err != nil {
-			return nil, fmt.Errorf("failed to decode response: %w", err)
-		}
-		if validateResp.KubernetesIO == nil || validateResp.KubernetesIO.ServiceAccount == nil {
-			return nil, fmt.Errorf("invalid response: missing kubernetes.io metadata")
-		}
-		identity := &CallerIdentity{
-			Namespace:      validateResp.KubernetesIO.Namespace,
-			ServiceAccount: validateResp.KubernetesIO.ServiceAccount.Name,
-			UID:            validateResp.KubernetesIO.ServiceAccount.UID,
-			Cluster:        c.cluster,
-		}
-		c.logger.Info("authentication successful",
-			"identity", fmt.Sprintf("%s/%s/%s", identity.Cluster, identity.Namespace, identity.ServiceAccount),
-		)
-		return identity, nil
-	case http.StatusUnauthorized, http.StatusBadRequest:
-		// Error responses contain error code and message
-		var errResp ErrorResponse
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			return nil, fmt.Errorf("auth failed: status %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.Message)
-	default:
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		c.logger.Error("auth service error",
 			"status", resp.StatusCode,
@@ -128,4 +110,40 @@ func (c *Client) Validate(ctx context.Context, token string) (*CallerIdentity, e
 		)
 		return nil, fmt.Errorf("auth service error: status %d", resp.StatusCode)
 	}
+
+	var reviewResp TokenReviewResponse
+	if err := json.NewDecoder(resp.Body).Decode(&reviewResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if !reviewResp.Status.Authenticated {
+		return nil, fmt.Errorf("authentication failed: %s", reviewResp.Status.Error)
+	}
+
+	if reviewResp.Status.User == nil {
+		return nil, fmt.Errorf("invalid response: missing user info")
+	}
+
+	identity, err := parseServiceAccountUsername(reviewResp.Status.User.Username)
+	if err != nil {
+		return nil, err
+	}
+	identity.UID = reviewResp.Status.User.UID
+
+	c.logger.Info("authentication successful",
+		"identity", fmt.Sprintf("%s/%s", identity.Namespace, identity.ServiceAccount),
+	)
+	return identity, nil
+}
+
+// parseServiceAccountUsername parses "system:serviceaccount:namespace:name" format
+func parseServiceAccountUsername(username string) (*CallerIdentity, error) {
+	parts := strings.Split(username, ":")
+	if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" {
+		return nil, fmt.Errorf("invalid serviceaccount username format: %s", username)
+	}
+	return &CallerIdentity{
+		Namespace:      parts[2],
+		ServiceAccount: parts[3],
+	}, nil
 }

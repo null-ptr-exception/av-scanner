@@ -20,37 +20,42 @@ func TestClient_Validate_Success(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
-		if r.URL.Path != "/validate" {
-			t.Errorf("expected /validate, got %s", r.URL.Path)
+		if r.URL.Path != tokenReviewPath {
+			t.Errorf("expected %s, got %s", tokenReviewPath, r.URL.Path)
 		}
 
-		var req ValidateRequest
+		var req TokenReviewRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
 
-		if req.Token != "test-token" {
-			t.Errorf("expected token 'test-token', got '%s'", req.Token)
+		if req.APIVersion != "authentication.k8s.io/v1" {
+			t.Errorf("expected apiVersion 'authentication.k8s.io/v1', got '%s'", req.APIVersion)
 		}
-		if req.Cluster != "test-cluster" {
-			t.Errorf("expected cluster 'test-cluster', got '%s'", req.Cluster)
+		if req.Kind != "TokenReview" {
+			t.Errorf("expected kind 'TokenReview', got '%s'", req.Kind)
+		}
+		if req.Spec.Token != "test-token" {
+			t.Errorf("expected token 'test-token', got '%s'", req.Spec.Token)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		// Response matches actual kube-federated-auth format
-		json.NewEncoder(w).Encode(ValidateResponse{
-			KubernetesIO: &KubernetesMetadata{
-				Namespace: "test-ns",
-				ServiceAccount: &ServiceAccountInfo{
-					Name: "test-sa",
-					UID:  "test-uid",
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "system:serviceaccount:test-ns:test-sa",
+					UID:      "test-uid",
+					Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:test-ns"},
 				},
 			},
 		})
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-cluster", 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger())
 	identity, err := client.Validate(context.Background(), "test-token")
 
 	if err != nil {
@@ -65,62 +70,66 @@ func TestClient_Validate_Success(t *testing.T) {
 	if identity.UID != "test-uid" {
 		t.Errorf("expected uid 'test-uid', got '%s'", identity.UID)
 	}
-	if identity.Cluster != "test-cluster" {
-		t.Errorf("expected cluster 'test-cluster', got '%s'", identity.Cluster)
-	}
 }
 
-func TestClient_Validate_InvalidToken(t *testing.T) {
+func TestClient_Validate_Unauthenticated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Error:   "invalid_signature",
-			Message: "Token signature verification failed",
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: false,
+				Error:         "token has expired",
+			},
 		})
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-cluster", 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger())
+	_, err := client.Validate(context.Background(), "expired-token")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "authentication failed: token has expired" {
+		t.Errorf("expected 'authentication failed' error, got '%s'", err.Error())
+	}
+}
+
+func TestClient_Validate_InvalidSignature(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: false,
+				Error:         "invalid token signature",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 5*time.Second, testLogger())
 	_, err := client.Validate(context.Background(), "invalid-token")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if err.Error() != "invalid_signature: Token signature verification failed" {
-		t.Errorf("expected 'invalid_signature' error, got '%s'", err.Error())
-	}
-}
-
-func TestClient_Validate_UnknownCluster(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Error:   "cluster_not_found",
-			Message: "Unknown cluster: unknown-cluster",
-		})
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "unknown-cluster", 5*time.Second, testLogger())
-	_, err := client.Validate(context.Background(), "test-token")
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if err.Error() != "cluster_not_found: Unknown cluster: unknown-cluster" {
-		t.Errorf("expected 'cluster_not_found' error, got '%s'", err.Error())
+	if err.Error() != "authentication failed: invalid token signature" {
+		t.Errorf("expected 'authentication failed' error, got '%s'", err.Error())
 	}
 }
 
 func TestClient_Validate_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal server error"))
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-cluster", 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger())
 	_, err := client.Validate(context.Background(), "test-token")
 
 	if err == nil {
@@ -131,33 +140,113 @@ func TestClient_Validate_ServerError(t *testing.T) {
 	}
 }
 
-func TestClient_Validate_TokenExpired(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Error:   "token_expired",
-			Message: "Token has expired",
-		})
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "test-cluster", 5*time.Second, testLogger())
-	_, err := client.Validate(context.Background(), "expired-token")
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if err.Error() != "token_expired: Token has expired" {
-		t.Errorf("expected 'token_expired' error, got '%s'", err.Error())
-	}
-}
-
 func TestClient_Validate_NetworkError(t *testing.T) {
-	client := NewClient("http://localhost:99999", "test-cluster", 1*time.Second, testLogger())
+	client := NewClient("http://localhost:99999", 1*time.Second, testLogger())
 	_, err := client.Validate(context.Background(), "test-token")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClient_Validate_InvalidUsernameFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "invalid-username-format",
+					UID:      "test-uid",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 5*time.Second, testLogger())
+	_, err := client.Validate(context.Background(), "test-token")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "invalid serviceaccount username format: invalid-username-format" {
+		t.Errorf("expected 'invalid serviceaccount username format' error, got '%s'", err.Error())
+	}
+}
+
+func TestParseServiceAccountUsername(t *testing.T) {
+	tests := []struct {
+		name        string
+		username    string
+		wantNS      string
+		wantSA      string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "valid username",
+			username: "system:serviceaccount:my-namespace:my-sa",
+			wantNS:   "my-namespace",
+			wantSA:   "my-sa",
+			wantErr:  false,
+		},
+		{
+			name:     "valid with dashes",
+			username: "system:serviceaccount:kube-system:default",
+			wantNS:   "kube-system",
+			wantSA:   "default",
+			wantErr:  false,
+		},
+		{
+			name:        "invalid prefix",
+			username:    "user:serviceaccount:ns:sa",
+			wantErr:     true,
+			errContains: "invalid serviceaccount username format",
+		},
+		{
+			name:        "invalid type",
+			username:    "system:user:ns:sa",
+			wantErr:     true,
+			errContains: "invalid serviceaccount username format",
+		},
+		{
+			name:        "too few parts",
+			username:    "system:serviceaccount:ns",
+			wantErr:     true,
+			errContains: "invalid serviceaccount username format",
+		},
+		{
+			name:        "too many parts",
+			username:    "system:serviceaccount:ns:sa:extra",
+			wantErr:     true,
+			errContains: "invalid serviceaccount username format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			identity, err := parseServiceAccountUsername(tt.username)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				} else if tt.errContains != "" && err.Error() != tt.errContains+": "+tt.username {
+					t.Errorf("error = %v, want contains %v", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if identity.Namespace != tt.wantNS {
+				t.Errorf("namespace = %v, want %v", identity.Namespace, tt.wantNS)
+			}
+			if identity.ServiceAccount != tt.wantSA {
+				t.Errorf("serviceAccount = %v, want %v", identity.ServiceAccount, tt.wantSA)
+			}
+		})
 	}
 }
