@@ -88,8 +88,9 @@ func TestAuthService_TokenReviewEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	// K8s API returns 200 or 201 for TokenReview
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 200/201, got %d: %s", resp.StatusCode, body)
 	}
 
 	var result tokenReviewResponse
@@ -129,9 +130,9 @@ func TestAuthService_InvalidToken(t *testing.T) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	// TokenReview API returns 200 with authenticated=false for invalid tokens
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	// K8s API returns 200 or 201, with authenticated=false for invalid tokens
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 200/201, got %d: %s", resp.StatusCode, body)
 	}
 
 	var result tokenReviewResponse
