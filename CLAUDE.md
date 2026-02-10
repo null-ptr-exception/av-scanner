@@ -14,7 +14,42 @@
 - Keep messages short (1-5 lines preferred)
 - Types: feat, fix, refactor, chore, docs, build, test
 
+## Running Tests
+
+**Unit tests:** `make test-unit` (or `go test -race ./...`)
+
+**E2e tests** use [BATS](https://github.com/bats-core/bats-core) (bash). Requires `bats`, `curl`, `jq`.
+
+**Scan tests** require a VM with ClamAV running:
+1. Set up the VM: `make vm-init && make setup-vm && make deploy`
+2. Run tests: `make test-e2e`
+3. Or manually: `API_URL=http://<VM_IP>:3000 bats test/e2e/scan.bats`
+
+**Auth tests** (`test/e2e/auth.bats`) — automatically skipped when env vars not set:
+- TokenReview tests: need `K8S_API_ENDPOINT` (e.g. `kubectl proxy --port=8082`)
+- Middleware tests: need `AUTH_ENABLED=true` + av-scanner running with auth enabled
+
+```bash
+# Run auth tests with kubectl proxy
+K8S_API_ENDPOINT=http://127.0.0.1:8082 bats test/e2e/auth.bats
+
+# Run middleware tests (av-scanner must be running with auth enabled)
+AUTH_ENABLED=true K8S_API_ENDPOINT=http://127.0.0.1:8082 \
+  API_URL=http://127.0.0.1:3000 bats test/e2e/auth.bats
+```
+
+The allowlist YAML format:
+```yaml
+allowlist:
+  - namespace/serviceaccount
+```
+
 ## VM Management
+
+**Before creating a VM, check system resources:**
+- RAM: VM needs 4GB, host should have at least 6GB available (`free -h`)
+- Disk: VM needs ~12GB (10GB disk + ClamAV databases) (`df -h /`)
+- Check for other VMs or heavy processes (minikube, etc.) that may compete for resources
 
 **Before creating a VM:**
 1. Check KVM support: `ls /dev/kvm` (exists = KVM available)

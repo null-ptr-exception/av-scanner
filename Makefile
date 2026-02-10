@@ -1,4 +1,4 @@
-.PHONY: help build push deploy clean test-unit test-integration vm-init vm-start vm-stop setup-vm
+.PHONY: help build push deploy clean test-unit test-e2e test-integration vm-init vm-start vm-stop setup-vm
 
 IMAGE_NAME ?= av-scanner
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -25,7 +25,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test-unit        Run unit tests"
-	@echo "  test-integration Run integration tests (requires API_URL or VM)"
+	@echo "  test-e2e         Run e2e tests (requires API_URL or VM)"
 
 # ============================================
 # VM Management
@@ -138,18 +138,10 @@ clean:
 test-unit:
 	go test -race ./...
 
-# Run integration tests (requires running server)
-test-integration:
-	@if [ -n "$(API_URL)" ]; then \
-		API_URL=$(API_URL) go test -tags=integration ./test/integration/... -v; \
-	elif [ -f $(STATE_FILE) ]; then \
-		. ./$(STATE_FILE); \
-		if [ "$$HYPERVISOR" = "multipass" ]; then \
-			API_URL="http://$$VM_IP:3000" go test -tags=integration ./test/integration/... -v; \
-		else \
-			API_URL="http://localhost:$$API_PORT" go test -tags=integration ./test/integration/... -v; \
-		fi; \
-	else \
-		echo "Set API_URL or run 'make vm-init' first"; exit 1; \
-	fi
+# Run e2e tests (requires running server)
+test-e2e:
+	bats test/e2e/
+
+# Alias for backwards compat
+test-integration: test-e2e
 
