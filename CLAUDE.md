@@ -23,20 +23,21 @@
 **Scan tests** require a VM with ClamAV running:
 1. Set up the VM: `make vm-init && make setup-vm && make deploy`
 2. Run tests: `make test-e2e`
-3. Or manually: `API_URL=http://<VM_IP>:3000 bats test/e2e/scan.bats`
+3. Or manually: `API_URL=http://<VM_IP>:3000 bats test/e2e/01_scan.bats`
 
-**Auth tests** (`test/e2e/auth.bats`) — require VM + auto-bootstrap kind cluster:
+**Auth tests** (`test/e2e/02_auth.bats`) — require VM + auto-bootstrap kind cluster:
 - Requires a running VM with ClamAV (`make vm-init && make setup-vm`)
 - Auto-creates kind cluster `av-scanner-e2e` with kube-federated-auth
 - Deploys av-scanner on VM with ClamAV engine + auth enabled
 - Leaves everything running for fast re-runs (VM stays auth-enabled)
 - Requires: `kind`, `docker`, `kubectl`
+- Tests are numbered so scan tests (01) run before auth tests (02) in `make test-e2e`
 
 ```bash
 # Run auth tests (requires VM, auto-creates kind cluster)
-bats test/e2e/auth.bats
+bats test/e2e/02_auth.bats
 
-# After auth tests, VM has auth enabled. To restore for scan tests:
+# After auth tests, VM has auth enabled. To restore no-auth:
 make deploy
 
 # Clean up kind cluster when done
