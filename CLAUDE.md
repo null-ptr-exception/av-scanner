@@ -25,17 +25,22 @@
 2. Run tests: `make test-e2e`
 3. Or manually: `API_URL=http://<VM_IP>:3000 bats test/e2e/scan.bats`
 
-**Auth tests** (`test/e2e/auth.bats`) — automatically skipped when env vars not set:
-- TokenReview tests: need `K8S_API_ENDPOINT` (e.g. `kubectl proxy --port=8082`)
-- Middleware tests: need `AUTH_ENABLED=true` + av-scanner running with auth enabled
+**Auth tests** (`test/e2e/auth.bats`) — require VM + auto-bootstrap kind cluster:
+- Requires a running VM with ClamAV (`make vm-init && make setup-vm`)
+- Auto-creates kind cluster `av-scanner-e2e` with kube-federated-auth
+- Deploys av-scanner on VM with ClamAV engine + auth enabled
+- Leaves everything running for fast re-runs (VM stays auth-enabled)
+- Requires: `kind`, `docker`, `kubectl`
 
 ```bash
-# Run auth tests with kubectl proxy
-K8S_API_ENDPOINT=http://127.0.0.1:8082 bats test/e2e/auth.bats
+# Run auth tests (requires VM, auto-creates kind cluster)
+bats test/e2e/auth.bats
 
-# Run middleware tests (av-scanner must be running with auth enabled)
-AUTH_ENABLED=true K8S_API_ENDPOINT=http://127.0.0.1:8082 \
-  API_URL=http://127.0.0.1:3000 bats test/e2e/auth.bats
+# After auth tests, VM has auth enabled. To restore for scan tests:
+make deploy
+
+# Clean up kind cluster when done
+kind delete cluster --name av-scanner-e2e
 ```
 
 The allowlist YAML format:

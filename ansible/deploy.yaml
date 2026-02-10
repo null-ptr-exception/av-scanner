@@ -101,6 +101,23 @@
         group: root
 
     # ============================================
+    # Auth Configuration (optional)
+    # ============================================
+    - name: Create av-scanner config directory
+      file:
+        path: /etc/av-scanner
+        state: directory
+        mode: "0755"
+
+    - name: Write allowlist file
+      copy:
+        content: "{{ auth_allowlist_content }}"
+        dest: "{{ auth_allowlist_file | default('/etc/av-scanner/allowlist.yaml') }}"
+        mode: "0644"
+      when: auth_allowlist_content is defined
+      notify: Restart av-scanner
+
+    # ============================================
     # Systemd Service Configuration
     # ============================================
     - name: Create av-scanner systemd service
@@ -119,6 +136,9 @@
           Environment=CLAMAV_RTS_LOG_PATH=/var/log/clamav/clamonacc.log
           Environment=TM_RTS_LOG_PATH=/var/log/ds_agent/ds_agent.log
           Environment=LOG_LEVEL=info
+          Environment=AUTH_ENABLED={{ auth_enabled | default(false) | string | lower }}
+          Environment=K8S_API_ENDPOINT={{ k8s_api_endpoint | default('') }}
+          Environment=AUTH_ALLOWLIST_FILE={{ auth_allowlist_file | default('/etc/av-scanner/allowlist.yaml') }}
           ExecStart=/usr/local/bin/av-scanner
           Restart=always
           RestartSec=5
@@ -136,14 +156,17 @@
         enabled: true
         daemon_reload: true
 
+    # Flush handlers now so any pending restart happens before verification
+    - meta: flush_handlers
+
     # ============================================
     # Verification
     # ============================================
     - name: Wait for service to be ready
       uri:
-        url: "http://localhost:3000/api/v1/health"
+        url: "http://localhost:3000/api/v1/live"
         method: GET
-        status_code: [200, 503]
+        status_code: [200]
       register: health_check
       until: health_check.status == 200
       retries: 30

@@ -21,6 +21,9 @@ if [[ -z "$API_URL" ]]; then
     fi
 fi
 
+# Kubernetes context (set by auth.bats setup_file, or from env)
+KUBE_CONTEXT="${KUBE_CONTEXT:-}"
+
 # K8s API endpoint for TokenReview tests
 K8S_API_ENDPOINT="${K8S_API_ENDPOINT:-}"
 
@@ -67,6 +70,15 @@ assert_json_field() {
     fi
 }
 
+# kubectl wrapper with context
+_kubectl() {
+    if [[ -n "$KUBE_CONTEXT" ]]; then
+        command kubectl --context "$KUBE_CONTEXT" "$@"
+    else
+        command kubectl "$@"
+    fi
+}
+
 # Get a ServiceAccount token via kubectl
 # Usage: get_sa_token <namespace> <serviceaccount>
 get_sa_token() {
@@ -76,7 +88,7 @@ get_sa_token() {
         echo "$TEST_SA_TOKEN"
         return
     fi
-    kubectl -n "$ns" create token "$sa" --duration=1h
+    _kubectl -n "$ns" create token "$sa" --duration=1h
 }
 
 # Send a TokenReview request
