@@ -67,67 +67,28 @@ setup_file() {
     export K8S_API_ENDPOINT="${kfa_endpoint}"
 
     # --- Deploy av-scanner on VM with auth ---
-    local image_tag
-    image_tag=$(cd "${project_root}" && git describe --tags --always --dirty 2>/dev/null || echo "dev")
-
-    echo "# Building and pushing av-scanner image (${image_tag})..."
-    if ! (cd "${project_root}" && make push); then
-        echo "# ERROR: make push failed"
-        false
-    fi
-
-    echo "# Deploying av-scanner on VM with auth enabled..."
     local extra_vars_file="/tmp/av-scanner-e2e-extra-vars.json"
     python3 -c "
 import json, sys
 json.dump({
-    'ansible_host': '${VM_IP}',
-    'image_tag': '${image_tag}',
     'auth_enabled': True,
     'k8s_api_endpoint': '${kfa_endpoint}',
     'auth_allowlist_content': 'allowlist:\n  - test-client/scanner-client\n'
 }, sys.stdout)
 " > "$extra_vars_file"
-    if ! (
-        cd "${project_root}" && \
-        if [[ -f venv/bin/activate ]]; then source venv/bin/activate; fi && \
-        cd ansible && \
-        ansible-playbook deploy.yaml -i inventory.yaml \
-            -e "@${extra_vars_file}"
-    ); then
+    if ! deploy_av_scanner "$extra_vars_file"; then
         rm -f "$extra_vars_file"
-        echo "# ERROR: ansible deploy failed"
         false
     fi
     rm -f "$extra_vars_file"
 
-    # Wait for av-scanner to be ready
-    export API_URL="http://${VM_IP}:3000"
     export AUTH_ENABLED="true"
-    echo "# Waiting for av-scanner at ${API_URL}..."
-    local i
-    for i in $(seq 1 30); do
-        if curl -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
-            echo "# av-scanner ready after ${i}s"
-            break
-        fi
-        sleep 2
-    done
-
-    if ! curl -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
-        echo "# ERROR: av-scanner not ready at ${API_URL}"
-        false
-    fi
-
     echo "# Setup complete: API_URL=${API_URL}, K8S_API_ENDPOINT=${K8S_API_ENDPOINT}"
 }
 
 teardown_file() {
-    # Everything is left running for fast re-runs.
-    # Clean up manually:
-    #   kind delete cluster --name av-scanner-e2e
-    #   # To restore av-scanner without auth:
-    #   make deploy
+    # Resources left running for fast re-runs.
+    # Clean up: kind delete cluster --name av-scanner-e2e
     true
 }
 

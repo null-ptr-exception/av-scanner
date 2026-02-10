@@ -1,5 +1,13 @@
 #!/usr/bin/env bats
 # E2e scan tests for av-scanner
+#
+# Deploys av-scanner on multipass VM with ClamAV (no auth).
+# Requires: VM running (make vm-init && make setup-vm)
+
+setup_file() {
+    load 'test_helper'
+    deploy_av_scanner
+}
 
 setup() {
     load 'test_helper'

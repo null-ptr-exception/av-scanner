@@ -20,25 +20,23 @@
 
 **E2e tests** use [BATS](https://github.com/bats-core/bats-core) (bash). Requires `bats`, `curl`, `jq`.
 
-**Scan tests** require a VM with ClamAV running:
-1. Set up the VM: `make vm-init && make setup-vm && make deploy`
-2. Run tests: `make test-e2e`
-3. Or manually: `API_URL=http://<VM_IP>:3000 bats test/e2e/01_scan.bats`
+**Scan tests** (`test/e2e/01_scan.bats`):
+- Deploys av-scanner on VM with no-auth (via ansible) in setup_file
+- Requires: VM running (`make vm-init && make setup-vm`)
 
-**Auth tests** (`test/e2e/02_auth.bats`) — require VM + auto-bootstrap kind cluster:
-- Requires a running VM with ClamAV (`make vm-init && make setup-vm`)
+**Auth tests** (`test/e2e/02_auth.bats`):
+- Deploys av-scanner on VM with auth enabled (via ansible) in setup_file
 - Auto-creates kind cluster `av-scanner-e2e` with kube-federated-auth
-- Deploys av-scanner on VM with ClamAV engine + auth enabled
-- Leaves everything running for fast re-runs (VM stays auth-enabled)
-- Requires: `kind`, `docker`, `kubectl`
-- Tests are numbered so scan tests (01) run before auth tests (02) in `make test-e2e`
+- Each test suite reconciles its own config, so ordering doesn't matter
+- Requires: VM running, `kind`, `docker`, `kubectl`
 
 ```bash
-# Run auth tests (requires VM, auto-creates kind cluster)
-bats test/e2e/02_auth.bats
+# Run all e2e tests
+make test-e2e
 
-# After auth tests, VM has auth enabled. To restore no-auth:
-make deploy
+# Run individually
+bats test/e2e/01_scan.bats
+bats test/e2e/02_auth.bats
 
 # Clean up kind cluster when done
 kind delete cluster --name av-scanner-e2e

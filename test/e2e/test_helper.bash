@@ -70,6 +70,64 @@ assert_json_field() {
     fi
 }
 
+# Deploy av-scanner on VM via ansible
+# Usage: deploy_av_scanner [extra_vars_file]
+#   extra_vars_file: optional path to JSON file with extra ansible vars
+deploy_av_scanner() {
+    local extra_vars_file="${1:-}"
+    local project_root
+    project_root="$(get_project_root)"
+
+    local state_file="${project_root}/.vm-state"
+    if [[ ! -f "$state_file" ]]; then
+        echo "# ERROR: .vm-state not found. Run 'make vm-init && make setup-vm' first."
+        return 1
+    fi
+    source "$state_file"
+
+    local image_tag
+    image_tag=$(cd "${project_root}" && git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
+    echo "# Building and pushing av-scanner image (${image_tag})..."
+    if ! (cd "${project_root}" && make push); then
+        echo "# ERROR: make push failed"
+        return 1
+    fi
+
+    echo "# Deploying av-scanner on VM..."
+    local ansible_extra_args=()
+    ansible_extra_args+=(-e "ansible_host=${VM_IP}")
+    ansible_extra_args+=(-e "image_tag=${image_tag}")
+    if [[ -n "$extra_vars_file" ]]; then
+        ansible_extra_args+=(-e "@${extra_vars_file}")
+    fi
+
+    if ! (
+        cd "${project_root}" && \
+        if [[ -f venv/bin/activate ]]; then source venv/bin/activate; fi && \
+        cd ansible && \
+        ansible-playbook deploy.yaml -i inventory.yaml \
+            "${ansible_extra_args[@]}"
+    ); then
+        echo "# ERROR: ansible deploy failed"
+        return 1
+    fi
+
+    export API_URL="http://${VM_IP}:3000"
+    echo "# Waiting for av-scanner at ${API_URL}..."
+    local i
+    for i in $(seq 1 30); do
+        if curl -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+            echo "# av-scanner ready after ${i}s"
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "# ERROR: av-scanner not ready at ${API_URL}"
+    return 1
+}
+
 # kubectl wrapper with context
 _kubectl() {
     if [[ -n "$KUBE_CONTEXT" ]]; then
