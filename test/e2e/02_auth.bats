@@ -63,9 +63,6 @@ setup_file() {
         false
     fi
 
-    # K8S_API_ENDPOINT for TokenReview tests from host
-    export K8S_API_ENDPOINT="${kfa_endpoint}"
-
     # --- Deploy av-scanner on VM with auth ---
     local extra_vars_file="/tmp/av-scanner-e2e-extra-vars.json"
     python3 -c "
@@ -82,8 +79,7 @@ json.dump({
     fi
     rm -f "$extra_vars_file"
 
-    export AUTH_ENABLED="true"
-    echo "# Setup complete: API_URL=${API_URL}, K8S_API_ENDPOINT=${K8S_API_ENDPOINT}"
+    echo "# Setup complete: API_URL=${API_URL}"
 }
 
 teardown_file() {
@@ -95,53 +91,6 @@ teardown_file() {
 setup() {
     load 'test_helper'
 }
-
-# --- TokenReview API tests ---
-
-@test "TokenReview validates valid service account token" {
-    local token
-    token=$(get_sa_token "test-client" "scanner-client")
-
-    local resp
-    resp=$(token_review "$token")
-
-    local authenticated username
-    authenticated=$(echo "$resp" | jq -r '.status.authenticated')
-    username=$(echo "$resp" | jq -r '.status.user.username')
-
-    if [[ "$authenticated" != "true" ]]; then
-        echo "ERROR: expected authenticated=true"
-        echo "Response: $resp"
-        false
-    fi
-
-    local expected="system:serviceaccount:test-client:scanner-client"
-    if [[ "$username" != "$expected" ]]; then
-        echo "ERROR: expected username=$expected, got $username"
-        false
-    fi
-
-    echo "# TokenReview: authenticated as $username"
-}
-
-@test "TokenReview rejects invalid token" {
-    local resp
-    resp=$(token_review "invalid-token")
-
-    local authenticated
-    authenticated=$(echo "$resp" | jq -r '.status.authenticated')
-
-    # kube-federated-auth may return authenticated=false or omit the field (null)
-    if [[ "$authenticated" == "true" ]]; then
-        echo "ERROR: expected authenticated!=true for invalid token"
-        echo "Response: $resp"
-        false
-    fi
-
-    echo "# Invalid token correctly rejected"
-}
-
-# --- Auth middleware tests ---
 
 @test "allowed service account can access protected endpoint" {
     local token

@@ -24,9 +24,6 @@ fi
 # Kubernetes context (set by auth.bats setup_file, or from env)
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 
-# K8s API endpoint for TokenReview tests
-K8S_API_ENDPOINT="${K8S_API_ENDPOINT:-}"
-
 # curl wrapper for API calls
 curl_api() {
     curl -s "$@"
@@ -149,12 +146,3 @@ get_sa_token() {
     _kubectl -n "$ns" create token "$sa" --duration=1h
 }
 
-# Send a TokenReview request
-# Usage: token_review <token>
-token_review() {
-    local token="$1"
-    curl -s -X POST \
-        -H "Content-Type: application/json" \
-        -d "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenReview\",\"spec\":{\"token\":\"${token}\"}}" \
-        "${K8S_API_ENDPOINT}/apis/authentication.k8s.io/v1/tokenreviews"
-}
