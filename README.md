@@ -192,9 +192,8 @@ multipass purge
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AUTH_ENABLED` | false | Enable K8s ServiceAccount authentication |
-| `AUTH_SERVICE_URL` | (required if enabled) | URL of kube-federated-auth service |
-| `AUTH_CLUSTER_NAME` | default | Cluster name for token validation |
-| `AUTH_TIMEOUT` | 5000 | Auth service timeout in ms |
+| `K8S_API_ENDPOINT` | (required if enabled) | URL of kube-federated-auth service |
+| `K8S_AUTH_TIMEOUT` | 5000 | Auth service timeout in ms |
 | `AUTH_ALLOWLIST_FILE` | /etc/av-scanner/allowlist.yaml | Path to ServiceAccount allowlist |
 
 ## Authentication
@@ -204,7 +203,7 @@ When deployed in Kubernetes, av-scanner supports authentication using Kubernetes
 ### How it works
 
 1. Client sends request with `Authorization: Bearer <k8s-sa-token>` header
-2. av-scanner validates token via kube-federated-auth `/validate` endpoint
+2. av-scanner validates token via kube-federated-auth TokenReview API (`/apis/authentication.k8s.io/v1/tokenreviews`)
 3. av-scanner checks if the ServiceAccount is in the allowlist
 4. Request proceeds if authorized, otherwise returns 401/403
 
@@ -212,8 +211,7 @@ When deployed in Kubernetes, av-scanner supports authentication using Kubernetes
 
 ```bash
 export AUTH_ENABLED=true
-export AUTH_SERVICE_URL=http://kube-federated-auth:8080
-export AUTH_CLUSTER_NAME=my-cluster
+export K8S_API_ENDPOINT=http://kube-federated-auth:8080
 export AUTH_ALLOWLIST_FILE=/etc/av-scanner/allowlist.yaml
 ```
 
@@ -222,12 +220,12 @@ export AUTH_ALLOWLIST_FILE=/etc/av-scanner/allowlist.yaml
 ```yaml
 # /etc/av-scanner/allowlist.yaml
 allowlist:
-  - my-cluster/namespace1/serviceaccount1
-  - my-cluster/namespace2/serviceaccount2
-  - other-cluster/ci-cd/pipeline-runner
+  - namespace1/serviceaccount1
+  - namespace2/serviceaccount2
+  - ci-cd/pipeline-runner
 ```
 
-Format: `{cluster}/{namespace}/{serviceAccount}`
+Format: `{namespace}/{serviceAccount}`
 
 The file is watched for changes and reloaded automatically (hot-reload).
 
@@ -269,10 +267,8 @@ spec:
         env:
         - name: AUTH_ENABLED
           value: "true"
-        - name: AUTH_SERVICE_URL
+        - name: K8S_API_ENDPOINT
           value: "http://kube-federated-auth.kube-federated-auth:8080"
-        - name: AUTH_CLUSTER_NAME
-          value: "my-cluster"
         volumeMounts:
         - name: allowlist
           mountPath: /etc/av-scanner
