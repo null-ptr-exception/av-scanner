@@ -1,4 +1,4 @@
-.PHONY: help build push deploy clean test-unit test-e2e test-integration vm-init vm-start vm-stop setup-vm
+.PHONY: help build push deploy clean test-unit test-e2e test-perf test-integration vm-init vm-start vm-stop setup-vm setup-node-exporter
 
 IMAGE_NAME ?= av-scanner
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -15,7 +15,8 @@ help:
 	@echo "             Use HYPERVISOR=qemu or HYPERVISOR=multipass to skip prompt"
 	@echo "  vm-start   Start existing VM"
 	@echo "  vm-stop    Stop VM"
-	@echo "  setup-vm   Install ClamAV and registry on VM via Ansible"
+	@echo "  setup-vm             Install ClamAV and registry on VM via Ansible"
+	@echo "  setup-node-exporter  Install Prometheus node_exporter on VM"
 	@echo ""
 	@echo "Build & Deploy:"
 	@echo "  build      Build Docker image containing Go binary"
@@ -26,6 +27,7 @@ help:
 	@echo "Testing:"
 	@echo "  test-unit        Run unit tests"
 	@echo "  test-e2e         Run e2e tests (requires API_URL or VM)"
+	@echo "  test-perf        Run k6 load tests with Prometheus metrics report"
 
 # ============================================
 # VM Management
@@ -74,6 +76,22 @@ setup-vm:
 			-e ansible_host=$$VM_IP; \
 	else \
 		ansible-playbook setup-vm.yaml -i inventory.yaml \
+			-e ansible_host=$$VM_IP \
+			-e ansible_port=$$SSH_PORT \
+			-e ansible_ssh_private_key_file=$(CURDIR)/.ssh/id_ed25519; \
+	fi
+
+# Install node_exporter on VM
+setup-node-exporter:
+	@if [ ! -f $(STATE_FILE) ]; then echo "Run 'make vm-init' first"; exit 1; fi
+	@. ./$(STATE_FILE) && \
+	if [ -f venv/bin/activate ]; then . venv/bin/activate; fi && \
+	cd ansible && \
+	if [ "$$HYPERVISOR" = "multipass" ]; then \
+		ansible-playbook node-exporter.yaml -i inventory.yaml \
+			-e ansible_host=$$VM_IP; \
+	else \
+		ansible-playbook node-exporter.yaml -i inventory.yaml \
 			-e ansible_host=$$VM_IP \
 			-e ansible_port=$$SSH_PORT \
 			-e ansible_ssh_private_key_file=$(CURDIR)/.ssh/id_ed25519; \
@@ -141,6 +159,10 @@ test-unit:
 # Run e2e tests (requires running server)
 test-e2e:
 	bats test/e2e/
+
+# Run k6 load tests with Prometheus metrics report
+test-perf:
+	./scripts/perf-test.sh
 
 # Alias for backwards compat
 test-integration: test-e2e

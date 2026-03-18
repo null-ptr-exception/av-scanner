@@ -37,6 +37,27 @@ setup_file() {
     fi
     kind export kubeconfig --name "$KIND_CLUSTER" 2>/dev/null
 
+    # Pre-load images into Kind (build kube-federated-auth locally if needed)
+    local kfa_image="rophy/kube-federated-auth:3.4.2"
+    if ! docker image inspect "$kfa_image" >/dev/null 2>&1; then
+        local kfa_dir="${project_root}/../kube-federated-auth"
+        if [[ -d "$kfa_dir" ]]; then
+            echo "# Building ${kfa_image} from local source..."
+            docker build -t "$kfa_image" "$kfa_dir"
+        else
+            echo "# Pulling ${kfa_image}..."
+            docker pull "$kfa_image"
+        fi
+    fi
+    kind load docker-image "$kfa_image" --name "$KIND_CLUSTER" 2>/dev/null || true
+
+    local prom_image="docker.io/prom/prometheus:v3.3.0"
+    if ! docker image inspect "$prom_image" >/dev/null 2>&1; then
+        echo "# Pulling ${prom_image}..."
+        docker pull "$prom_image"
+    fi
+    kind load docker-image "$prom_image" --name "$KIND_CLUSTER" 2>/dev/null || true
+
     echo "# Deploying kube-federated-auth..."
     _kubectl apply -f "${project_root}/test/kube-federated-auth.yaml"
     _kubectl rollout status deployment/kube-federated-auth \
@@ -54,6 +75,14 @@ setup_file() {
         false
     fi
     echo "# Host bridge IP: ${bridge_ip}"
+
+    # Deploy Prometheus with VM_IP substituted for scrape targets
+    echo "# Deploying Prometheus (VM_IP=${VM_IP})..."
+    sed "s/VM_IP_PLACEHOLDER/${VM_IP}/g" "${project_root}/test/prometheus.yaml" \
+        | _kubectl apply -f -
+    _kubectl rollout restart deployment/prometheus -n monitoring
+    _kubectl rollout status deployment/prometheus \
+        -n monitoring --timeout=120s
 
     # Verify kube-federated-auth is reachable via host NodePort
     local kfa_endpoint="http://${bridge_ip}:30082"
