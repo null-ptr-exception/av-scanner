@@ -7,3 +7,6 @@ av-scanner
 
 # SSH keys for QEMU VMs
 .ssh/
+
+# E2e test VM artifacts
+.e2e-vms/

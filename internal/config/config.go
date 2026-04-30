@@ -28,6 +28,7 @@ type AuthConfig struct {
 	K8sAPIEndpoint string // Kubernetes API endpoint for TokenReview
 	Timeout        int    // milliseconds
 	AllowlistFile  string // path to allowlist YAML file
+	TokenPath      string // path to SA token file for authenticating to the auth service
 }
 
 type Config struct {
@@ -72,6 +73,7 @@ func Load() (*Config, error) {
 			K8sAPIEndpoint: getEnv("K8S_API_ENDPOINT", ""),
 			Timeout:        getEnvInt("K8S_AUTH_TIMEOUT", 5000),
 			AllowlistFile:  getEnv("AUTH_ALLOWLIST_FILE", "/etc/av-scanner/allowlist.yaml"),
+			TokenPath:      getEnv("K8S_AUTH_TOKEN_PATH", ""),
 		},
 	}
 
@@ -98,6 +100,11 @@ func (c *Config) Validate() error {
 		}
 		if c.Auth.Timeout < 1 {
 			return fmt.Errorf("invalid auth timeout: %d", c.Auth.Timeout)
+		}
+		if c.Auth.TokenPath != "" {
+			if _, err := os.Stat(c.Auth.TokenPath); err != nil {
+				return fmt.Errorf("invalid K8S_AUTH_TOKEN_PATH %q: %w", c.Auth.TokenPath, err)
+			}
 		}
 	}
 	return nil
