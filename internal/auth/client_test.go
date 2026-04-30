@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,7 +56,7 @@ func TestClient_Validate_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
 	identity, err := client.Validate(context.Background(), "test-token")
 
 	if err != nil {
@@ -86,7 +87,7 @@ func TestClient_Validate_Unauthenticated(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
 	_, err := client.Validate(context.Background(), "expired-token")
 
 	if err == nil {
@@ -111,7 +112,7 @@ func TestClient_Validate_InvalidSignature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
 	_, err := client.Validate(context.Background(), "invalid-token")
 
 	if err == nil {
@@ -129,7 +130,7 @@ func TestClient_Validate_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
 	_, err := client.Validate(context.Background(), "test-token")
 
 	if err == nil {
@@ -141,7 +142,7 @@ func TestClient_Validate_ServerError(t *testing.T) {
 }
 
 func TestClient_Validate_NetworkError(t *testing.T) {
-	client := NewClient("http://localhost:99999", 1*time.Second, testLogger())
+	client := NewClient("http://localhost:99999", 1*time.Second, testLogger(), "")
 	_, err := client.Validate(context.Background(), "test-token")
 
 	if err == nil {
@@ -166,7 +167,7 @@ func TestClient_Validate_InvalidUsernameFormat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second, testLogger())
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
 	_, err := client.Validate(context.Background(), "test-token")
 
 	if err == nil {
@@ -248,5 +249,82 @@ func TestParseServiceAccountUsername(t *testing.T) {
 				t.Errorf("serviceAccount = %v, want %v", identity.ServiceAccount, tt.wantSA)
 			}
 		})
+	}
+}
+
+func TestClient_Validate_WithServiceAccountToken(t *testing.T) {
+	tokenFile := t.TempDir() + "/token"
+	if err := os.WriteFile(tokenFile, []byte("my-sa-token\n"), 0600); err != nil {
+		t.Fatalf("failed to write token file: %v", err)
+	}
+
+	var receivedAuthHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuthHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "system:serviceaccount:test-ns:test-sa",
+					UID:      "test-uid",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 5*time.Second, testLogger(), tokenFile)
+	_, err := client.Validate(context.Background(), "client-token")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedAuthHeader != "Bearer my-sa-token" {
+		t.Errorf("expected Authorization 'Bearer my-sa-token', got '%s'", receivedAuthHeader)
+	}
+}
+
+func TestClient_Validate_WithMissingTokenFile(t *testing.T) {
+	client := NewClient("http://localhost", 5*time.Second, testLogger(), "/nonexistent/token")
+	_, err := client.Validate(context.Background(), "client-token")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to read service account token") {
+		t.Errorf("expected token read error, got: %s", err.Error())
+	}
+}
+
+func TestClient_Validate_WithoutServiceAccountToken(t *testing.T) {
+	var receivedAuthHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuthHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenReviewResponse{
+			APIVersion: "authentication.k8s.io/v1",
+			Kind:       "TokenReview",
+			Status: TokenReviewStatus{
+				Authenticated: true,
+				User: &UserInfo{
+					Username: "system:serviceaccount:test-ns:test-sa",
+					UID:      "test-uid",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, 5*time.Second, testLogger(), "")
+	_, err := client.Validate(context.Background(), "client-token")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedAuthHeader != "" {
+		t.Errorf("expected no Authorization header, got '%s'", receivedAuthHeader)
 	}
 }

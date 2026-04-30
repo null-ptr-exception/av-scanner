@@ -33,7 +33,7 @@ func setupTestMiddleware(t *testing.T, authServerHandler http.HandlerFunc) (*Mid
 	}
 
 	// Create client
-	client := NewClient(authServer.URL, 5*time.Second, testLogger())
+	client := NewClient(authServer.URL, 5*time.Second, testLogger(), "")
 
 	// Create middleware
 	middleware := NewMiddleware(client, allowlist, testLogger(), []string{

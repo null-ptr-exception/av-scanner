@@ -70,31 +70,46 @@ assert_json_field() {
 # Deploy av-scanner on VM via ansible
 # Usage: deploy_av_scanner [extra_vars_file]
 #   extra_vars_file: optional path to JSON file with extra ansible vars
+#
+# Supports two modes:
+#   1. e2e VM (E2E_SSH_PORT set): uses localhost + SSH port forwarding
+#   2. Legacy .vm-state: uses VM_IP from state file
 deploy_av_scanner() {
     local extra_vars_file="${1:-}"
     local project_root
     project_root="$(get_project_root)"
 
-    local state_file="${project_root}/.vm-state"
-    if [[ ! -f "$state_file" ]]; then
-        echo "# ERROR: .vm-state not found. Run 'make vm-init && make setup-vm' first."
-        return 1
-    fi
-    source "$state_file"
-
-    local image_tag
-    image_tag=$(cd "${project_root}" && git describe --tags --always --dirty 2>/dev/null || echo "dev")
-
-    echo "# Building and pushing av-scanner image (${image_tag})..."
-    if ! (cd "${project_root}" && make push); then
-        echo "# ERROR: make push failed"
+    echo "# Building av-scanner binary..."
+    local binary_path="/tmp/av-scanner-e2e"
+    if ! (cd "${project_root}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$binary_path" main.go); then
+        echo "# ERROR: go build failed"
         return 1
     fi
 
     echo "# Deploying av-scanner on VM..."
     local ansible_extra_args=()
-    ansible_extra_args+=(-e "ansible_host=${VM_IP}")
-    ansible_extra_args+=(-e "image_tag=${image_tag}")
+    ansible_extra_args+=(-e "binary_path=${binary_path}")
+
+    if [[ -n "${E2E_SSH_PORT:-}" ]]; then
+        # e2e VM mode: localhost with port forwarding
+        ansible_extra_args+=(-e "ansible_host=localhost")
+        ansible_extra_args+=(-e "ansible_port=${E2E_SSH_PORT}")
+        ansible_extra_args+=(-e "ansible_ssh_private_key_file=${E2E_SSH_KEY}")
+    else
+        # Legacy .vm-state mode
+        local state_file="${project_root}/.vm-state"
+        if [[ ! -f "$state_file" ]]; then
+            echo "# ERROR: .vm-state not found and E2E_SSH_PORT not set."
+            return 1
+        fi
+        source "$state_file"
+        ansible_extra_args+=(-e "ansible_host=${VM_IP}")
+        if [[ "$HYPERVISOR" != "multipass" ]]; then
+            ansible_extra_args+=(-e "ansible_port=${SSH_PORT}")
+            ansible_extra_args+=(-e "ansible_ssh_private_key_file=${project_root}/.ssh/id_ed25519")
+        fi
+    fi
+
     if [[ -n "$extra_vars_file" ]]; then
         ansible_extra_args+=(-e "@${extra_vars_file}")
     fi
@@ -110,7 +125,12 @@ deploy_av_scanner() {
         return 1
     fi
 
-    export API_URL="http://${VM_IP}:3000"
+    if [[ -n "${E2E_API_PORT:-}" ]]; then
+        export API_URL="http://localhost:${E2E_API_PORT}"
+    elif [[ -n "${VM_IP:-}" ]]; then
+        export API_URL="http://${VM_IP}:3000"
+    fi
+
     echo "# Waiting for av-scanner at ${API_URL}..."
     local i
     for i in $(seq 1 30); do

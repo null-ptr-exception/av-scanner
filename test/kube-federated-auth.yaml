@@ -63,7 +63,7 @@ spec:
       serviceAccountName: kube-federated-auth
       containers:
       - name: kube-federated-auth
-        image: rophy/kube-federated-auth:3.4.2
+        image: ghcr.io/rophy/kube-federated-auth:3.4.2
         ports:
         - containerPort: 8080
         env:

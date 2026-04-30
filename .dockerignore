@@ -1,6 +1,8 @@
 venv/
 *.tar
 .git/
-ansible/
 README.md
 Makefile
+test/
+.e2e-vms/
+.ssh/

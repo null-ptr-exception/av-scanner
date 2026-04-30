@@ -1,0 +1,61 @@
+name: E2E Tests
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Unit tests
+        run: go test ./...
+
+  e2e:
+    runs-on: [self-hosted, nuc-rophy]
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install test dependencies
+        run: |
+          if ! command -v bats &>/dev/null || ! command -v cloud-localds &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+              bats cloud-image-utils
+          fi
+
+      - name: Install kind
+        run: |
+          if ! command -v kind &>/dev/null; then
+            curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+            echo "a6875aaea358acf0ac07786b1a6755d08fd640f4c79b7a2e46681cc13f49a04b  /tmp/kind" | sha256sum -c -
+            chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
+          fi
+
+      - name: Install kubectl
+        run: |
+          if ! command -v kubectl &>/dev/null; then
+            KVER="$(curl -Ls https://dl.k8s.io/release/stable.txt)"
+            curl -Lo /tmp/kubectl "https://dl.k8s.io/release/${KVER}/bin/linux/amd64/kubectl"
+            curl -Lo /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KVER}/bin/linux/amd64/kubectl.sha256"
+            echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
+            chmod +x /tmp/kubectl && sudo mv /tmp/kubectl /usr/local/bin/kubectl
+          fi
+
+      - name: Run e2e tests
+        run: bats --print-output-on-failure --verbose-run test/e2e/01_e2e.bats

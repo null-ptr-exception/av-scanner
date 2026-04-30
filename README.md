@@ -55,117 +55,91 @@ This hybrid approach ensures:
 - **Race condition handling**: Checks RTS cache before and after on-demand scan
 - **Ephemeral file handling**: Files are deleted immediately after scanning
 - **Native systemd integration**: Runs as a native binary via systemd
+- **SA token authentication**: Kubernetes ServiceAccount token auth via [kube-federated-auth](https://github.com/rophy/kube-federated-auth)
+- **CronJob deployer**: Automated deployment via K8s CronJob that mints fresh SA tokens
 
-## Quick Start
+## Deployment
 
-### 1. Install Prerequisites
+av-scanner is deployed to a VM using an Ansible playbook. There are two deployment methods:
 
-```bash
-# Install Multipass (Ubuntu/Debian)
-sudo snap install multipass
+### Local development (make deploy)
 
-# Install Ansible (in a virtualenv named 'venv' - required by Makefile)
-python3 -m venv venv
-source venv/bin/activate
-pip install ansible
-```
-
-> **Note:** The `venv` directory must exist with Ansible installed. `make deploy` automatically activates it.
-
-### 2. Create the Scanning VM
+Build the Go binary locally and deploy directly to a VM via Ansible:
 
 ```bash
-# Create Ubuntu VM with 2 CPUs, 2GB RAM, 10GB disk
-multipass launch --name av-scanner --cpus 2 --memory 2G --disk 10G 24.04
+# 1. Create a VM
+make vm-init
 
-# Verify VM is running
-multipass list
-```
-
-### 3. Build and Deploy
-
-```bash
-# Get VM IP address
-export AV_SCANNER_IP=$(multipass info av-scanner | grep IPv4 | awk '{print $2}')
-
-# Copy your SSH key to the VM
-multipass exec av-scanner -- bash -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-cat ~/.ssh/id_rsa.pub | multipass exec av-scanner -- bash -c "cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-
-# Build the Docker image locally and deploy to VM
+# 2. Build binary and deploy
 make deploy
 ```
 
-The `make deploy` command will:
-1. Build the Docker image locally (contains Go binary)
-2. Save it to a tarball
-3. Transfer the image to the VM via Ansible
-4. Extract the binary from the image using Podman
-5. Install the binary to `/usr/local/bin/av-scanner`
-6. Create a systemd service
-7. Start and enable the service
-8. Wait for health check to pass
+`make deploy` will:
+1. Cross-compile the Go binary for linux/amd64
+2. Run the Ansible playbook (`ansible/deploy.yaml`) which:
+   - Installs ClamAV and configures real-time scanning
+   - Copies the binary to `/usr/local/bin/av-scanner`
+   - Creates and starts a systemd service
+   - Waits for the health check to pass
 
-### 4. Access the Scanner API
+### Production (K8s CronJob)
+
+In production, a **K8s CronJob** runs every 12 hours to deploy av-scanner and refresh SA tokens:
+
+```mermaid
+flowchart LR
+    CronJob["CronJob Pod"] -->|1. kubectl create token| K8sAPI["K8s API"]
+    CronJob -->|2. ansible-playbook over SSH| VM["Target VM"]
+    VM -->|3. auth requests with SA token| KFA["kube-federated-auth"]
+```
+
+The deployer image (`deploy/Dockerfile`) bundles the Go binary, Ansible, and kubectl. The entrypoint (`deploy/entrypoint.sh`):
+1. Mints a fresh SA token via `kubectl create token` (default: 24h expiry)
+2. Runs the Ansible playbook to deploy the binary and token to the VM
+
+The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure the token is refreshed before it expires.
+
+To deploy the CronJob:
 
 ```bash
-# Get VM IP address
-multipass info av-scanner | grep IPv4
+# Build the deployer image
+make build-deploy
 
-# Test the API (from host)
-curl http://<VM_IP>:3000/api/v1/health
+# Apply K8s resources (namespace, RBAC, CronJob)
+kubectl apply -f deploy/cronjob.yaml
+```
 
-# Scan a file
-curl -X POST -F "file=@testfile.txt" http://<VM_IP>:3000/api/v1/scan
+See `deploy/cronjob.yaml` for the full manifest including ServiceAccounts, RBAC, and SSH key Secret.
+
+## VM Management
+
+```bash
+# Create VM (auto-detects KVM/QEMU)
+make vm-init
+
+# Use a specific hypervisor
+HYPERVISOR=qemu make vm-init
+HYPERVISOR=multipass make vm-init
+
+# Start/stop existing VM
+make vm-start
+make vm-stop
 ```
 
 ## Makefile Targets
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Build the Docker image locally |
-| `make deploy` | Build, save, and deploy image to VM |
-| `make test` | Upload EICAR test file to VM and verify detection |
-| `make clean` | Remove local image and tarball |
-
-## Service Management
-
-The scanner runs as a native systemd service:
-
-```bash
-# SSH into VM
-multipass shell av-scanner
-
-# Check service status
-sudo systemctl status av-scanner
-
-# View logs
-sudo journalctl -u av-scanner -f
-
-# Restart service
-sudo systemctl restart av-scanner
-
-# Stop service
-sudo systemctl stop av-scanner
-```
-
-## Multipass VM Management
-
-```bash
-# List VMs
-multipass list
-
-# Start/Stop VM
-multipass start av-scanner
-multipass stop av-scanner
-
-# Shell into VM
-multipass shell av-scanner
-
-# Delete VM
-multipass delete av-scanner
-multipass purge
-```
+| `make vm-init` | Create a VM (QEMU or Multipass) |
+| `make vm-start` | Start existing VM |
+| `make vm-stop` | Stop VM |
+| `make build` | Build the binary-only container image |
+| `make build-deploy` | Build the deployer image (binary + ansible + kubectl) |
+| `make deploy` | Build binary locally and deploy to VM via ansible |
+| `make test-unit` | Run unit tests |
+| `make test-e2e` | Run e2e tests (BATS) |
+| `make test-perf` | Run k6 load tests |
+| `make clean` | Remove local images |
 
 ## Configuration
 
@@ -195,37 +169,40 @@ multipass purge
 | `K8S_API_ENDPOINT` | (required if enabled) | URL of kube-federated-auth service |
 | `K8S_AUTH_TIMEOUT` | 5000 | Auth service timeout in ms |
 | `AUTH_ALLOWLIST_FILE` | /etc/av-scanner/allowlist.yaml | Path to ServiceAccount allowlist |
+| `K8S_AUTH_TOKEN_PATH` | (optional) | Path to SA token file for authenticating to kube-federated-auth |
+
+### Deployer CronJob Configuration
+
+These env vars are set on the deployer CronJob container (see `deploy/cronjob.yaml`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
+| `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
+| `TOKEN_DURATION` | 24h | Token expiry (must be longer than CronJob schedule) |
+| `AV_SCANNER_IP` | (required) | Target VM IP address |
+| `AV_SCANNER_KEY` | /ssh/id_ed25519 | Path to SSH private key |
 
 ## Authentication
 
-When deployed in Kubernetes, av-scanner supports authentication using Kubernetes ServiceAccount tokens via [kube-federated-auth](https://github.com/rophy/kube-federated-auth).
+av-scanner supports authentication using Kubernetes ServiceAccount tokens via [kube-federated-auth](https://github.com/rophy/kube-federated-auth).
 
 ### How it works
 
 1. Client sends request with `Authorization: Bearer <k8s-sa-token>` header
-2. av-scanner validates token via kube-federated-auth TokenReview API (`/apis/authentication.k8s.io/v1/tokenreviews`)
-3. av-scanner checks if the ServiceAccount is in the allowlist
-4. Request proceeds if authorized, otherwise returns 401/403
-
-### Enable authentication
-
-```bash
-export AUTH_ENABLED=true
-export K8S_API_ENDPOINT=http://kube-federated-auth:8080
-export AUTH_ALLOWLIST_FILE=/etc/av-scanner/allowlist.yaml
-```
+2. av-scanner forwards the token to kube-federated-auth's TokenReview API
+3. If `K8S_AUTH_TOKEN_PATH` is set, av-scanner authenticates itself to kube-federated-auth using its own SA token
+4. av-scanner checks if the client's ServiceAccount is in the allowlist
+5. Request proceeds if authorized, otherwise returns 401/403
 
 ### Allowlist file format
 
 ```yaml
 # /etc/av-scanner/allowlist.yaml
 allowlist:
-  - namespace1/serviceaccount1
-  - namespace2/serviceaccount2
+  - namespace/serviceaccount
   - ci-cd/pipeline-runner
 ```
-
-Format: `{namespace}/{serviceAccount}`
 
 The file is watched for changes and reloaded automatically (hot-reload).
 
@@ -243,46 +220,18 @@ The file is watched for changes and reloaded automatically (hot-reload).
 | 401 | Token validation failed (expired, invalid signature) |
 | 403 | ServiceAccount not in allowlist |
 
-### Kubernetes deployment example
+## Service Management
 
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: av-scanner-allowlist
-data:
-  allowlist.yaml: |
-    allowlist:
-      - my-cluster/app-namespace/app-sa
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: av-scanner
-spec:
-  template:
-    spec:
-      containers:
-      - name: av-scanner
-        env:
-        - name: AUTH_ENABLED
-          value: "true"
-        - name: K8S_API_ENDPOINT
-          value: "http://kube-federated-auth.kube-federated-auth:8080"
-        volumeMounts:
-        - name: allowlist
-          mountPath: /etc/av-scanner
-      volumes:
-      - name: allowlist
-        configMap:
-          name: av-scanner-allowlist
-```
-
-To change configuration, edit the systemd service file on the VM:
+The scanner runs as a systemd service on the target VM:
 
 ```bash
-sudo vi /etc/systemd/system/av-scanner.service
-sudo systemctl daemon-reload
+# Check service status
+sudo systemctl status av-scanner
+
+# View logs
+sudo journalctl -u av-scanner -f
+
+# Restart service
 sudo systemctl restart av-scanner
 ```
 
@@ -330,74 +279,38 @@ Readiness probe (checks active engine health).
 ### GET /api/v1/live
 Liveness probe.
 
-## Testing with EICAR
+## Testing
+
+### Unit tests
 
 ```bash
-# Run the EICAR test via Makefile
-make test
+make test-unit
 ```
 
-Or manually:
+### E2E tests
+
+E2E tests use [BATS](https://github.com/bats-core/bats-core) and create a QEMU VM + kind cluster to test the full deployment path (K8s Job as ansible controller):
 
 ```bash
-# Download official EICAR test file
-curl -s https://secure.eicar.org/eicar.com -o /tmp/eicar.com
+# Run all e2e tests
+make test-e2e
 
-# Test via API
-curl -X POST -F "file=@/tmp/eicar.com" http://<VM_IP>:3000/api/v1/scan
-# Expected response: status = "infected", signature = "Win.Test.EICAR_HDB-1"
+# Run individually
+bats test/e2e/01_e2e.bats
 ```
 
-## Stress Testing with k6
-
-A [k6](https://k6.io/) stress test script is included to verify scan accuracy under load.
-
-### Setup
-
-```bash
-# Install k6
-sudo snap install k6
-```
-
-> **Note:** The test script generates EICAR test content dynamically from character codes to avoid triggering AV software on developer machines.
-
-### Run Stress Test
+### Stress testing with k6
 
 ```bash
 # Default: 10 VUs for 30 seconds
-k6 run k6-stress-test.js
+make test-perf
 
-# Custom API URL
-k6 run -e API_URL=http://192.168.1.100:3000 k6-stress-test.js
-
-# Higher load: 50 VUs for 60 seconds
+# Custom API URL and load
+k6 run -e API_URL=http://<VM_IP>:3000 k6-stress-test.js
 k6 run --vus 50 --duration 60s k6-stress-test.js
 ```
 
-### Test Behavior
-
-- **80% clean files / 20% infected files** (EICAR)
-- Verifies **100% correct scan results** (clean→"clean", infected→"infected")
-- Reports any mismatches as failures
-
-### Example Output
-
-```
-========== STRESS TEST SUMMARY ==========
-Total requests:    3240
-Clean files:       2553 (78.8%)
-Infected files:    687 (21.2%)
-Correct results:   100.00%
-Scan errors:       0
-Avg scan duration: 88.1ms
-==========================================
-```
-
-### Thresholds
-
-The test enforces:
-- `correct_results`: Must be 100% (all scan results match expected)
-- `http_req_failed`: Must be <1% (minimal HTTP errors)
+The stress test sends 80% clean / 20% infected (EICAR) files and verifies 100% correct scan results.
 
 ## License
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"net/http"
 	"strings"
 	"time"
@@ -60,14 +61,18 @@ type CallerIdentity struct {
 // Client handles authentication via Kubernetes TokenReview API
 type Client struct {
 	baseURL    string
+	tokenPath  string
 	httpClient *http.Client
 	logger     *slog.Logger
 }
 
-// NewClient creates a new auth client
-func NewClient(baseURL string, timeout time.Duration, logger *slog.Logger) *Client {
+// NewClient creates a new auth client.
+// tokenPath is optional — when set, the client reads a SA token from that file
+// and sends it as Authorization header when calling the auth service.
+func NewClient(baseURL string, timeout time.Duration, logger *slog.Logger, tokenPath string) *Client {
 	return &Client{
-		baseURL: baseURL,
+		baseURL:   baseURL,
+		tokenPath: tokenPath,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -95,6 +100,14 @@ func (c *Client) Validate(ctx context.Context, token string) (*CallerIdentity, e
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	if c.tokenPath != "" {
+		saToken, err := os.ReadFile(c.tokenPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read service account token from %s: %w", c.tokenPath, err)
+		}
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(saToken)))
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

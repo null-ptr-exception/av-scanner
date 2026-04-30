@@ -38,6 +38,7 @@ func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, err
 			cfg.Auth.K8sAPIEndpoint,
 			time.Duration(cfg.Auth.Timeout)*time.Millisecond,
 			logger,
+			cfg.Auth.TokenPath,
 		)
 
 		// Load allowlist
