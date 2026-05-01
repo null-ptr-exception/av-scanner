@@ -66,6 +66,11 @@ jobs:
       - name: Create e2e VMs
         run: ./scripts/vm-init.sh --name e2e --count 2 --force
 
+      - name: Allow Docker-to-virbr0 forwarding
+        run: |
+          sudo iptables -I DOCKER-USER -o virbr0 -j ACCEPT
+          sudo iptables -I DOCKER-USER -i virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
       - name: Run e2e tests
         run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/01_e2e.bats
 

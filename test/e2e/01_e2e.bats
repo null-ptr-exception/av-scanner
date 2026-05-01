@@ -35,6 +35,20 @@ setup_file() {
     fi
     kind export kubeconfig --name "$KIND_CLUSTER" 2>/dev/null
 
+    # --- Route from kind node to virbr0 so pods can SSH to VMs ---
+    local virbr0_subnet
+    virbr0_subnet=$(ip -4 route show dev virbr0 proto kernel | awk '{print $1}')
+    if [[ -n "$virbr0_subnet" ]]; then
+        local kind_node="${KIND_CLUSTER}-control-plane"
+        local host_gateway
+        host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
+        if [[ -n "$host_gateway" ]]; then
+            echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
+            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" 2>/dev/null || true
+            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE 2>/dev/null || true
+        fi
+    fi
+
     # --- Build and load deployer image ---
     local deploy_image="av-scanner-deploy:e2e"
     echo "# Building deployer image..."
@@ -123,11 +137,32 @@ INVEOF
     # --- Run molecule inside controller pod ---
     echo "# Running molecule inside controller pod..."
 
+    # Verify network connectivity from kind node and controller pod to VMs
+    local kind_node="${KIND_CLUSTER}-control-plane"
+    echo "# DEBUG: kind node routes:"
+    docker exec "$kind_node" ip route 2>&1 | while IFS= read -r l; do echo "# $l"; done
+    echo "# DEBUG: host nftables ruleset:"
+    sudo nft list ruleset 2>&1 | while IFS= read -r l; do echo "# $l"; done || true
+    echo "# DEBUG: host iptables FORWARD chain (first 20 rules):"
+    sudo iptables -L FORWARD -n -v 2>&1 | head -25 | while IFS= read -r l; do echo "# $l"; done || true
+
+    for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
+        echo "# Testing SSH to ${vm_ip} from controller pod..."
+        if ! _kubectl -n av-scanner exec "$controller_pod" -- \
+            ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=10 -i /ssh/id_ed25519 \
+                "ubuntu@${vm_ip}" "echo ok" 2>&1 | while IFS= read -r l; do echo "# $l"; done; then
+            echo "# ERROR: controller pod cannot SSH to ${vm_ip}"
+            false
+        fi
+    done
+
     # Write allowlist content to a file inside the pod (avoids quoting issues)
     _kubectl -n av-scanner exec "$controller_pod" -- bash -c \
         'printf "allowlist:\n  - test-client/scanner-client\n" > /tmp/allowlist.yaml'
 
     local molecule_log="/tmp/e2e-molecule.log"
+    local molecule_rc=0
     _kubectl -n av-scanner exec "$controller_pod" -- env \
         MOLECULE_VM1_IP="${E2E_VM1_IP}" \
         MOLECULE_VM2_IP="${E2E_VM2_IP}" \
@@ -139,8 +174,7 @@ INVEOF
         MOLECULE_AUTH_ALLOWLIST_FILE="/tmp/allowlist.yaml" \
         MOLECULE_TOKEN_FILE="/tmp/sa-token" \
         bash -c "cd /app/ansible/roles/av-scanner && molecule test --destroy never" \
-        > "$molecule_log" 2>&1
-    local molecule_rc=$?
+        > "$molecule_log" 2>&1 || molecule_rc=$?
 
     # Show molecule summary
     echo "# --- Molecule output ---"
