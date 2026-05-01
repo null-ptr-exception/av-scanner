@@ -1,0 +1,37 @@
+image:
+  registry: ghcr.io
+  repository: null-ptr-exception/av-scanner-deploy
+  tag: latest
+
+cronjob:
+  schedule: "0 */12 * * *"
+
+controller:
+  enabled: false
+
+token:
+  duration: 24h
+  serviceAccount: av-scanner
+
+sshKey:
+  existingSecret: ""
+
+inventory: |
+  all:
+    vars:
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      ansible_ssh_private_key_file: /ssh/id_ed25519
+    hosts:
+      vm1:
+        ansible_host: 192.168.64.2
+        ansible_user: ubuntu
+      vm2:
+        ansible_host: 192.168.64.3
+        ansible_user: ubuntu
+
+# Point to a custom inventory file mounted via extraVolumes.
+# When set, overrides the inventory value above.
+existingInventoryPath: ""
+
+extraVolumes: []
+extraVolumeMounts: []

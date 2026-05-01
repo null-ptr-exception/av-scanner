@@ -34,9 +34,9 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          if ! command -v bats &>/dev/null || ! command -v cloud-localds &>/dev/null; then
+          if ! command -v bats &>/dev/null || ! command -v cloud-localds &>/dev/null || ! command -v virt-install &>/dev/null; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-              bats cloud-image-utils
+              bats cloud-image-utils virtinst libvirt-daemon-system qemu-utils
           fi
 
       - name: Install kind
@@ -57,5 +57,20 @@ jobs:
             chmod +x /tmp/kubectl && sudo mv /tmp/kubectl /usr/local/bin/kubectl
           fi
 
+      - name: Install Helm
+        run: |
+          if ! command -v helm &>/dev/null; then
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
+
+      - name: Create e2e VMs
+        run: ./scripts/vm-init.sh --name e2e --count 2 --force
+
       - name: Run e2e tests
-        run: bats --print-output-on-failure --verbose-run test/e2e/01_e2e.bats
+        run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/01_e2e.bats
+
+      - name: Cleanup
+        if: always()
+        run: |
+          ./scripts/vm-destroy.sh --name e2e --count 2
+          kind delete cluster --name av-scanner-e2e 2>/dev/null || true

@@ -1,0 +1,65 @@
+---
+- name: Verify av-scanner deployment
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    av_engine: "{{ lookup('env', 'MOLECULE_AV_ENGINE') | default('clamav', true) }}"
+  tasks:
+    - name: av-scanner binary exists
+      stat:
+        path: /usr/local/bin/av-scanner
+      register: binary
+      failed_when: not binary.stat.exists
+
+    - name: av-scanner service is running
+      systemd:
+        name: av-scanner
+      register: svc
+      failed_when: svc.status.ActiveState != "active"
+
+    - name: av-scanner health check responds
+      uri:
+        url: "http://localhost:3000/api/v1/live"
+        method: GET
+        status_code: [200]
+      register: health
+      until: health.status == 200
+      retries: 10
+      delay: 2
+
+    - name: ClamAV daemon is running
+      systemd:
+        name: clamav-daemon
+      register: clamav
+      failed_when: clamav.status.ActiveState != "active"
+      when: av_engine == "clamav"
+
+    - name: clamonacc is running
+      systemd:
+        name: clamav-clamonacc
+      register: clamonacc
+      failed_when: clamonacc.status.ActiveState != "active"
+      when: av_engine == "clamav"
+
+    - name: node_exporter is running
+      systemd:
+        name: node_exporter
+      register: ne
+      failed_when: ne.status.ActiveState != "active"
+
+    - name: node_exporter metrics endpoint responds
+      uri:
+        url: "http://localhost:9100/metrics"
+        method: GET
+        status_code: [200]
+
+    - name: Scan directory is mounted as tmpfs
+      command: findmnt -t tmpfs /tmp/av-scanner
+      changed_when: false
+
+    - name: Quarantine directory exists
+      stat:
+        path: /tmp/av-scanner/quarantine
+      register: quarantine
+      failed_when: not quarantine.stat.exists

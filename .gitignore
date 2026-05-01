@@ -1,12 +1,6 @@
 venv/
 *.tar
-av-scanner
+/av-scanner
 
-# VM state file (created by scripts/vm-init.sh)
-.vm-state
-
-# SSH keys for QEMU VMs
-.ssh/
-
-# E2e test VM artifacts
-.e2e-vms/
+# VM artifacts (libvirt disk images, cloud-init, SSH keys)
+.vms/

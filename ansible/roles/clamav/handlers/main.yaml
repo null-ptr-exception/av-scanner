@@ -1,0 +1,11 @@
+- name: Restart ClamAV daemon
+  systemd:
+    name: clamav-daemon
+    state: restarted
+    daemon_reload: true
+
+- name: Restart clamonacc
+  systemd:
+    name: clamav-clamonacc
+    state: restarted
+    daemon_reload: true

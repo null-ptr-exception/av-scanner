@@ -1,0 +1,44 @@
+suite: RBAC
+templates:
+  - rbac.yaml
+release:
+  name: av-scanner
+  namespace: av-scanner
+tests:
+  - it: should create Role and RoleBinding
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should grant tokenrequest on the token SA
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: Role
+      - equal:
+          path: rules[0].resources
+          value: ["serviceaccounts/token"]
+      - equal:
+          path: rules[0].resourceNames
+          value: ["av-scanner"]
+      - equal:
+          path: rules[0].verbs
+          value: ["create"]
+
+  - it: should bind to deployer SA
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: RoleBinding
+      - equal:
+          path: subjects[0].name
+          value: av-scanner-deployer
+
+  - it: should use custom token SA in role resourceNames
+    set:
+      token.serviceAccount: custom-sa
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: rules[0].resourceNames
+          value: ["custom-sa"]

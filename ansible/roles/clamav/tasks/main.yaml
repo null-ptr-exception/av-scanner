@@ -1,0 +1,108 @@
+- name: Install ClamAV packages
+  apt:
+    name:
+      - clamav
+      - clamav-daemon
+      - clamav-freshclam
+    state: present
+
+- name: Check if ClamAV database exists
+  stat:
+    path: /var/lib/clamav/daily.cvd
+  register: clamav_db
+
+- name: Stop freshclam service temporarily
+  systemd:
+    name: clamav-freshclam
+    state: stopped
+  failed_when: false
+  when: not clamav_db.stat.exists
+
+- name: Update ClamAV database (this may take a while)
+  command: freshclam
+  register: freshclam_result
+  changed_when: "'Database updated' in freshclam_result.stdout"
+  failed_when: false
+  timeout: 600
+  when: not clamav_db.stat.exists
+
+- name: Start freshclam service
+  systemd:
+    name: clamav-freshclam
+    state: started
+    enabled: true
+  when: not clamav_db.stat.exists
+
+- name: Ensure freshclam is enabled and running
+  systemd:
+    name: clamav-freshclam
+    state: started
+    enabled: true
+
+- name: Wait for ClamAV database files
+  wait_for:
+    path: "/var/lib/clamav/{{ item }}"
+    state: present
+    timeout: 600
+  loop:
+    - daily.cvd
+    - main.cvd
+
+- name: Ensure ClamAV daemon is enabled and started
+  systemd:
+    name: clamav-daemon
+    state: started
+    enabled: true
+  register: clamav_daemon_start
+  retries: 5
+  delay: 10
+  until: clamav_daemon_start is succeeded
+
+- name: Configure ClamAV on-access scanning
+  blockinfile:
+    path: /etc/clamav/clamd.conf
+    marker: "# {mark} ANSIBLE MANAGED - On-Access Scanning"
+    block: |
+      OnAccessMountPath {{ scan_dir }}
+      OnAccessExcludeUname clamav
+      OnAccessPrevention yes
+      LogTime yes
+  notify: Restart ClamAV daemon
+
+- name: Create clamonacc systemd service
+  copy:
+    content: |
+      [Unit]
+      Description=ClamAV On-Access Scanner
+      Requires=clamav-daemon.service
+      After=clamav-daemon.service
+
+      [Service]
+      Type=simple
+      User=root
+      ExecStart=/usr/sbin/clamonacc --foreground --log={{ clamav_log_dir }}/clamonacc.log --move={{ scan_dir }}/quarantine
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/clamav-clamonacc.service
+    mode: "0644"
+  notify: Restart clamonacc
+
+- name: Ensure clamonacc log file exists
+  file:
+    path: "{{ clamav_log_dir }}/clamonacc.log"
+    state: touch
+    owner: clamav
+    group: clamav
+    mode: "0644"
+  changed_when: false
+
+- name: Enable and start clamonacc
+  systemd:
+    name: clamav-clamonacc
+    state: started
+    enabled: true
+    daemon_reload: true
+  failed_when: false

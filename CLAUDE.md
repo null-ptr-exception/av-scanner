@@ -50,26 +50,23 @@ allowlist:
 
 ## VM Management
 
+VMs are managed via **libvirt/virsh** (`qemu:///system`). VMs get real IPs on the default NAT network (virbr0).
+
 **Before creating a VM, check system resources:**
 - RAM: VM needs 4GB, host should have at least 6GB available (`free -h`)
 - Disk: VM needs ~12GB (10GB disk + ClamAV databases) (`df -h /`)
-- Check for other VMs or heavy processes (minikube, etc.) that may compete for resources
+- Check for existing VMs: `virsh list --all`
 
-**Before creating a VM:**
-1. Check KVM support: `ls /dev/kvm` (exists = KVM available)
-2. Check Multipass: `multipass list` (shows existing VMs)
-3. Check QEMU VMs: `cat .vm-state` or `ls ~/qemu-vms/`
-4. Stop existing VM first: `make vm-stop` and `rm .vm-state`
+**VM init supports `--name`, `--count`, `--force`:**
+```bash
+./scripts/vm-init.sh                              # 1 VM named "av-scanner"
+./scripts/vm-init.sh --name molecule --count 2     # molecule-1, molecule-2
+./scripts/vm-init.sh --name av-scanner-e2e --force # destroy+recreate
+```
 
-**Interactive prompts:** `make vm-init` and `./scripts/vm-init.sh` have interactive prompts. When running non-interactively, pipe `echo "y"` or use:
-- `HYPERVISOR=multipass make vm-init` - skip hypervisor prompt
-- `HYPERVISOR=qemu make vm-init` - skip hypervisor prompt
+**No state files** — virsh is the source of truth for VM existence and IPs.
 
-**Performance:**
-- Multipass (KVM): ~1-2 min VM startup, recommended for development
-- QEMU (TCG): ~5-10 min VM startup, software emulation fallback when KVM unavailable
-
-**Port conflicts:** Default API_PORT=3000. If occupied, use `API_PORT=3001 make vm-init`
+**Prerequisites:** `virsh`, `virt-install`, `qemu-img`, `cloud-localds`
 
 ## Container Runtime
 

@@ -1,0 +1,11 @@
+- name: Restart av-scanner
+  systemd:
+    name: av-scanner
+    state: restarted
+    daemon_reload: true
+
+- name: Restart node_exporter
+  systemd:
+    name: node_exporter
+    state: restarted
+    daemon_reload: true

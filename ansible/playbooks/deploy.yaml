@@ -1,0 +1,10 @@
+---
+- name: Deploy AV Scanner to VM
+  hosts: all
+  serial: 1
+  become: true
+  gather_facts: true
+  roles:
+    - role: clamav
+      when: av_engine | default('clamav') == "clamav"
+    - av-scanner

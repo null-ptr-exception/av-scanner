@@ -1,0 +1,2 @@
+scan_dir: /tmp/av-scanner
+clamav_log_dir: /var/log/clamav
