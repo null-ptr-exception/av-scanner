@@ -76,67 +76,72 @@ make deploy
 
 `make deploy` will:
 1. Cross-compile the Go binary for linux/amd64
-2. Run the Ansible playbook (`ansible/deploy.yaml`) which:
+2. Run the Ansible playbook (`ansible/playbooks/deploy.yaml`) which:
    - Installs ClamAV and configures real-time scanning
    - Copies the binary to `/usr/local/bin/av-scanner`
    - Creates and starts a systemd service
    - Waits for the health check to pass
 
-### Production (K8s CronJob)
+### Production (Helm chart)
 
-In production, a **K8s CronJob** runs every 12 hours to deploy av-scanner and refresh SA tokens:
+In production, a **K8s CronJob** runs every 12 hours to deploy av-scanner to VMs (rolling, one at a time) and refresh SA tokens:
 
 ```mermaid
 flowchart LR
     CronJob["CronJob Pod"] -->|1. kubectl create token| K8sAPI["K8s API"]
-    CronJob -->|2. ansible-playbook over SSH| VM["Target VM"]
-    VM -->|3. auth requests with SA token| KFA["kube-federated-auth"]
+    CronJob -->|2. ansible-playbook over SSH| VMs["Target VMs (serial)"]
+    VMs -->|3. auth requests with SA token| KFA["kube-federated-auth"]
 ```
 
-The deployer image (`deploy/Dockerfile`) bundles the Go binary, Ansible, and kubectl. The entrypoint (`deploy/entrypoint.sh`):
+The deployer image (`docker/Dockerfile`) bundles the Go binary, Ansible, and kubectl. The entrypoint (`docker/entrypoint.sh`):
 1. Mints a fresh SA token via `kubectl create token` (default: 24h expiry)
-2. Runs the Ansible playbook to deploy the binary and token to the VM
+2. Runs the Ansible playbook to deploy the binary and token to VMs (one at a time)
 
 The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure the token is refreshed before it expires.
 
-To deploy the CronJob:
+To deploy:
 
 ```bash
 # Build the deployer image
 make build-deploy
 
-# Apply K8s resources (namespace, RBAC, CronJob)
-kubectl apply -f deploy/cronjob.yaml
+# Install the Helm chart
+helm install av-scanner charts/av-scanner -n av-scanner --create-namespace
 ```
 
-See `deploy/cronjob.yaml` for the full manifest including ServiceAccounts, RBAC, and SSH key Secret.
+See `charts/av-scanner/values.yaml` for all configurable values.
 
 ## VM Management
 
+VMs are managed via libvirt/virsh. Each VM gets a real IP on the default NAT network. No state files — virsh is the source of truth.
+
 ```bash
-# Create VM (auto-detects KVM/QEMU)
-make vm-init
+# Create VM (default: 1 VM named "av-scanner")
+./scripts/vm-init.sh
 
-# Use a specific hypervisor
-HYPERVISOR=qemu make vm-init
-HYPERVISOR=multipass make vm-init
+# Create multiple VMs
+./scripts/vm-init.sh --name molecule --count 2
 
-# Start/stop existing VM
+# Start/stop/destroy
 make vm-start
 make vm-stop
+make vm-destroy
 ```
 
 ## Makefile Targets
 
 | Target | Description |
 |--------|-------------|
-| `make vm-init` | Create a VM (QEMU or Multipass) |
+| `make vm-init` | Create VM via libvirt/virsh |
 | `make vm-start` | Start existing VM |
-| `make vm-stop` | Stop VM |
+| `make vm-stop` | Graceful shutdown |
+| `make vm-destroy` | Destroy VM and remove disk |
 | `make build` | Build the binary-only container image |
 | `make build-deploy` | Build the deployer image (binary + ansible + kubectl) |
 | `make deploy` | Build binary locally and deploy to VM via ansible |
 | `make test-unit` | Run unit tests |
+| `make test-helm` | Run Helm chart lint and unit tests |
+| `make test-molecule` | Run Molecule tests |
 | `make test-e2e` | Run e2e tests (BATS) |
 | `make test-perf` | Run k6 load tests |
 | `make clean` | Remove local images |
@@ -173,15 +178,14 @@ make vm-stop
 
 ### Deployer CronJob Configuration
 
-These env vars are set on the deployer CronJob container (see `deploy/cronjob.yaml`):
+These env vars are set on the deployer CronJob container (see `charts/av-scanner/values.yaml`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
 | `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
 | `TOKEN_DURATION` | 24h | Token expiry (must be longer than CronJob schedule) |
-| `AV_SCANNER_IP` | (required) | Target VM IP address |
-| `AV_SCANNER_KEY` | /ssh/id_ed25519 | Path to SSH private key |
+| `INVENTORY_PATH` | inventory.yaml | Path to Ansible inventory file |
 
 ## Authentication
 
@@ -289,9 +293,12 @@ make test-unit
 
 ### E2E tests
 
-E2E tests use [BATS](https://github.com/bats-core/bats-core) and create a QEMU VM + kind cluster to test the full deployment path (K8s Job as ansible controller):
+E2E tests use [BATS](https://github.com/bats-core/bats-core) with a libvirt VM + kind cluster to test the full deployment path (K8s Job as ansible controller):
 
 ```bash
+# Create e2e VM first
+./scripts/vm-init.sh --name av-scanner-e2e
+
 # Run all e2e tests
 make test-e2e
 

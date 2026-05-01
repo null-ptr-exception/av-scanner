@@ -49,13 +49,13 @@ preflight() {
     fi
     log_ok "k6 $(k6 version 2>&1 | head -1)"
 
-    # VM state
-    local state_file="${PROJECT_ROOT}/.vm-state"
-    if [[ ! -f "$state_file" ]]; then
-        log_error ".vm-state not found. Run 'make vm-init && make setup-vm && make deploy' first."
+    # VM discovery via virsh
+    source "$SCRIPT_DIR/lib/virsh.sh"
+    VM_IP=$(virsh_get_ip "av-scanner" 2>/dev/null || true)
+    if [[ -z "$VM_IP" ]]; then
+        log_error "VM 'av-scanner' not running. Run 'make vm-init && make deploy' first."
         exit 1
     fi
-    source "$state_file"
     export VM_IP
     export API_URL="http://${VM_IP}:3000"
 

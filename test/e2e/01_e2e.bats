@@ -1,14 +1,17 @@
 #!/usr/bin/env bats
 # End-to-end tests for av-scanner
 #
-# Creates a QEMU VM and a kind cluster, then deploys av-scanner via a K8s Job
-# (the same deployer image used by the CronJob in production). Tests both
-# scan functionality and SA token auth.
+# Deploys the controller Deployment into a kind cluster, runs molecule
+# inside it to deploy av-scanner to 2 VMs, then tests scan and auth
+# behavior from outside.
 #
-# Requires: kind, docker, kubectl, qemu-system-x86_64, cloud-localds
+# Requires: kind, docker, kubectl, helm, virsh
+#
+# Prerequisites:
+#   ./scripts/vm-init.sh --name e2e --count 2
 #
 # Env vars:
-#   E2E_CLEAN_ALL=1   - delete all artifacts (VM, kind cluster) on teardown
+#   E2E_CLEAN_ALL=1   - delete all artifacts (VMs, kind cluster) on teardown
 
 setup_file() {
     load 'vm_helper'
@@ -17,7 +20,7 @@ setup_file() {
     local project_root
     project_root="$(get_project_root)"
 
-    # --- VM ---
+    # --- VMs ---
     e2e_vm_setup
 
     # --- Kind cluster ---
@@ -32,10 +35,24 @@ setup_file() {
     fi
     kind export kubeconfig --name "$KIND_CLUSTER" 2>/dev/null
 
+    # --- Route from kind node to virbr0 so pods can SSH to VMs ---
+    local virbr0_subnet
+    virbr0_subnet=$(ip -4 route show dev virbr0 proto kernel | awk '{print $1}')
+    if [[ -n "$virbr0_subnet" ]]; then
+        local kind_node="${KIND_CLUSTER}-control-plane"
+        local host_gateway
+        host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
+        if [[ -n "$host_gateway" ]]; then
+            echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
+            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" 2>/dev/null || true
+            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE 2>/dev/null || true
+        fi
+    fi
+
     # --- Build and load deployer image ---
     local deploy_image="av-scanner-deploy:e2e"
     echo "# Building deployer image..."
-    docker build -f "${project_root}/deploy/Dockerfile" \
+    docker build -f "${project_root}/docker/Dockerfile" \
         -t "$deploy_image" "$project_root" >/dev/null 2>&1
     kind load docker-image "$deploy_image" --name "$KIND_CLUSTER" 2>/dev/null || true
 
@@ -58,144 +75,149 @@ setup_file() {
     _kubectl rollout status deployment/kube-federated-auth \
         -n kube-federated-auth --timeout=120s
 
-    # --- Deployer RBAC + SA ---
-    echo "# Setting up deployer RBAC..."
-    _kubectl apply -f "${project_root}/deploy/cronjob.yaml"
+    # --- kube-federated-auth endpoint as seen from the VMs ---
+    local vm_gateway
+    vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
+    local kfa_endpoint="http://${vm_gateway}:30082"
+
+    # --- Clean slate for Helm ---
+    helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner 2>/dev/null || true
+    _kubectl delete namespace av-scanner --ignore-not-found 2>/dev/null || true
+    _kubectl create namespace av-scanner
+
+    # --- SSH key secret ---
+    _kubectl -n av-scanner create secret generic av-scanner-ssh-key \
+        --from-file=id_ed25519="${E2E_SSH_KEY}"
+
+    # --- Helm install with controller ---
+    local inventory
+    inventory=$(cat <<INVEOF
+all:
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    ansible_ssh_private_key_file: /ssh/id_ed25519
+  hosts:
+    vm1:
+      ansible_host: ${E2E_VM1_IP}
+      ansible_user: ubuntu
+    vm2:
+      ansible_host: ${E2E_VM2_IP}
+      ansible_user: ubuntu
+INVEOF
+)
+
+    echo "# Installing Helm chart..."
+    helm upgrade --install av-scanner "${project_root}/charts/av-scanner" \
+        --kube-context "$KUBE_CONTEXT" \
+        -n av-scanner --create-namespace \
+        --set controller.enabled=true \
+        --set image.registry="" \
+        --set image.repository=av-scanner-deploy \
+        --set image.tag=e2e \
+        --set sshKey.existingSecret=av-scanner-ssh-key \
+        --set-string "inventory=${inventory}" \
+        --wait --timeout 120s
 
     # --- Test service accounts ---
     _kubectl create namespace test-client 2>/dev/null || true
     _kubectl -n test-client create serviceaccount scanner-client 2>/dev/null || true
 
-    # --- Discover host IP reachable from kind pods ---
-    # kind nodes are docker containers; the host is reachable via docker bridge gateway
-    local host_ip
-    host_ip=$(docker inspect "${KIND_CLUSTER}-control-plane" \
-        --format '{{ .NetworkSettings.Networks.kind.Gateway }}')
-    if [[ -z "$host_ip" ]]; then
-        echo "# ERROR: cannot determine host IP from kind network"
-        false
-    fi
-    echo "# Host IP from kind: ${host_ip}"
+    # --- Mint SA token inside controller pod ---
+    local controller_pod
+    controller_pod=$(_kubectl -n av-scanner get pod \
+        -l app.kubernetes.io/name=av-scanner-controller \
+        -o jsonpath='{.items[0].metadata.name}')
 
-    # kube-federated-auth endpoint as seen from the VM:
-    # QEMU user-mode networking uses 10.0.2.2 as the host gateway,
-    # and kind maps NodePort 30082 to the host.
-    local vm_gateway="10.0.2.2"
-    local kfa_endpoint="http://${vm_gateway}:30082"
+    echo "# Minting SA token inside controller pod..."
+    _kubectl -n av-scanner exec "$controller_pod" -- bash -c '
+        kubectl create token av-scanner -n av-scanner --duration=1h > /tmp/sa-token
+        chmod 600 /tmp/sa-token
+    '
 
-    # --- Create secrets and config ---
-    _kubectl -n av-scanner delete secret av-scanner-ssh-key 2>/dev/null || true
-    _kubectl -n av-scanner create secret generic av-scanner-ssh-key \
-        --from-file=id_ed25519="${E2E_SSH_KEY}"
+    # --- Run molecule inside controller pod ---
+    echo "# Running molecule inside controller pod..."
 
-    # Ansible extra vars as JSON file mounted into the pod
-    _kubectl -n av-scanner delete configmap deploy-extra-vars 2>/dev/null || true
-    _kubectl -n av-scanner create configmap deploy-extra-vars \
-        --from-literal=extra-vars.json="$(cat <<'VARSEOF'
-{
-  "auth_enabled": true,
-  "k8s_api_endpoint": "PLACEHOLDER_KFA",
-  "auth_allowlist_content": "allowlist:\n  - test-client/scanner-client\n"
-}
-VARSEOF
-)"
-    # Patch in the actual kfa_endpoint (can't use shell var inside single-quoted heredoc)
-    local cm_json
-    cm_json=$(_kubectl -n av-scanner get configmap deploy-extra-vars -o jsonpath='{.data.extra-vars\.json}')
-    cm_json="${cm_json//PLACEHOLDER_KFA/$kfa_endpoint}"
-    _kubectl -n av-scanner delete configmap deploy-extra-vars
-    _kubectl -n av-scanner create configmap deploy-extra-vars \
-        --from-literal=extra-vars.json="$cm_json"
+    # Verify network connectivity from kind node and controller pod to VMs
+    local kind_node="${KIND_CLUSTER}-control-plane"
+    echo "# DEBUG: kind node routes:"
+    docker exec "$kind_node" ip route 2>&1 | while IFS= read -r l; do echo "# $l"; done
+    echo "# DEBUG: host nftables ruleset:"
+    sudo nft list ruleset 2>&1 | while IFS= read -r l; do echo "# $l"; done || true
+    echo "# DEBUG: host iptables FORWARD chain (first 20 rules):"
+    sudo iptables -L FORWARD -n -v 2>&1 | head -25 | while IFS= read -r l; do echo "# $l"; done || true
 
-    # --- Run deployer Job ---
-    echo "# Running deployer Job..."
-    local ssh_port="${E2E_SSH_PORT:-2222}"
-
-    # Delete previous Job if exists
-    _kubectl -n av-scanner delete job av-scanner-deploy-e2e 2>/dev/null || true
-
-    cat <<JOBEOF | _kubectl apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: av-scanner-deploy-e2e
-  namespace: av-scanner
-spec:
-  backoffLimit: 0
-  template:
-    spec:
-      serviceAccountName: av-scanner-deployer
-      restartPolicy: Never
-      containers:
-        - name: deploy
-          image: ${deploy_image}
-          imagePullPolicy: Never
-          env:
-            - name: SA_NAME
-              value: "av-scanner"
-            - name: SA_NAMESPACE
-              value: "av-scanner"
-            - name: TOKEN_DURATION
-              value: "1h"
-            - name: AV_SCANNER_IP
-              value: "${host_ip}"
-            - name: AV_SCANNER_PORT
-              value: "${ssh_port}"
-            - name: AV_SCANNER_KEY
-              value: "/ssh/id_ed25519"
-          args:
-            - "-e"
-            - "@/etc/deploy/extra-vars.json"
-          volumeMounts:
-            - name: ssh-key
-              mountPath: /ssh
-              readOnly: true
-            - name: extra-vars
-              mountPath: /etc/deploy
-              readOnly: true
-      volumes:
-        - name: ssh-key
-          secret:
-            secretName: av-scanner-ssh-key
-            defaultMode: 0400
-        - name: extra-vars
-          configMap:
-            name: deploy-extra-vars
-JOBEOF
-
-    echo "# Waiting for deployer Job to complete..."
-    if ! _kubectl -n av-scanner wait --for=condition=complete \
-        job/av-scanner-deploy-e2e --timeout=600s; then
-        echo "# ERROR: deployer Job failed. Logs:"
-        _kubectl -n av-scanner logs job/av-scanner-deploy-e2e || true
-        false
-    fi
-
-    # --- Verify av-scanner is running ---
-    export API_URL="http://localhost:${E2E_API_PORT:-3000}"
-    echo "# Waiting for av-scanner at ${API_URL}..."
-    local i
-    for i in $(seq 1 30); do
-        if curl -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
-            echo "# av-scanner ready after $((i * 2))s"
-            break
+    for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
+        echo "# Testing SSH to ${vm_ip} from controller pod..."
+        if ! _kubectl -n av-scanner exec "$controller_pod" -- \
+            ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=10 -i /ssh/id_ed25519 \
+                "ubuntu@${vm_ip}" "echo ok" 2>&1 | while IFS= read -r l; do echo "# $l"; done; then
+            echo "# ERROR: controller pod cannot SSH to ${vm_ip}"
+            false
         fi
-        sleep 2
     done
 
-    if ! curl -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
-        echo "# ERROR: av-scanner not ready at ${API_URL}"
+    # Write allowlist content to a file inside the pod (avoids quoting issues)
+    _kubectl -n av-scanner exec "$controller_pod" -- bash -c \
+        'printf "allowlist:\n  - test-client/scanner-client\n" > /tmp/allowlist.yaml'
+
+    local molecule_log="/tmp/e2e-molecule.log"
+    local molecule_rc=0
+    _kubectl -n av-scanner exec "$controller_pod" -- env \
+        MOLECULE_VM1_IP="${E2E_VM1_IP}" \
+        MOLECULE_VM2_IP="${E2E_VM2_IP}" \
+        MOLECULE_SSH_KEY="/ssh/id_ed25519" \
+        MOLECULE_AV_SCANNER_BINARY="/app/av-scanner" \
+        MOLECULE_NODE_EXPORTER_BINARY="/app/node_exporter" \
+        MOLECULE_AUTH_ENABLED="true" \
+        MOLECULE_K8S_API_ENDPOINT="${kfa_endpoint}" \
+        MOLECULE_AUTH_ALLOWLIST_FILE="/tmp/allowlist.yaml" \
+        MOLECULE_TOKEN_FILE="/tmp/sa-token" \
+        bash -c "cd /app/ansible/roles/av-scanner && molecule test --destroy never" \
+        > "$molecule_log" 2>&1 || molecule_rc=$?
+
+    # Show molecule summary
+    echo "# --- Molecule output ---"
+    grep -E 'INFO|WARNING|ERROR|CRITICAL|PLAY RECAP|Molecule executed|ok=|changed=|failed=' \
+        "$molecule_log" | while IFS= read -r line; do
+        echo "# $line"
+    done
+    echo "# --- End molecule output ---"
+
+    if [[ $molecule_rc -ne 0 ]]; then
+        echo "# ERROR: molecule failed (exit code $molecule_rc). Full log: $molecule_log"
         false
     fi
+
+    # --- Verify av-scanner is ready on both VMs ---
+    export API_URL="http://${E2E_VM1_IP}:3000"
+    for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
+        echo "# Waiting for av-scanner at http://${vm_ip}:3000..."
+        local i
+        for i in $(seq 1 30); do
+            if curl -s --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null 2>&1; then
+                echo "# av-scanner ready on ${vm_ip}"
+                break
+            fi
+            sleep 2
+        done
+        if ! curl -s --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null 2>&1; then
+            echo "# ERROR: av-scanner not ready at http://${vm_ip}:3000"
+            false
+        fi
+    done
 
     echo "# Setup complete: API_URL=${API_URL}"
 }
 
 teardown_file() {
     load 'vm_helper'
+    load 'test_helper'
     e2e_vm_teardown
 
     if [[ "${E2E_CLEAN_ALL:-0}" == "1" ]]; then
+        echo "# Cleaning up Helm release..."
+        helm uninstall av-scanner --kube-context "kind-av-scanner-e2e" -n av-scanner 2>/dev/null || true
         echo "# Deleting kind cluster..."
         kind delete cluster --name av-scanner-e2e 2>/dev/null || true
     fi
@@ -203,7 +225,6 @@ teardown_file() {
 
 setup() {
     load 'test_helper'
-    # Get a token for the allowed SA to use in scan tests
     AUTH_TOKEN=$(get_sa_token "test-client" "scanner-client")
 }
 
@@ -238,8 +259,16 @@ setup() {
     assert_json_field "$resp" '.status' 'infected'
 }
 
+@test "scan works on second VM" {
+    local resp
+    resp=$(echo "clean test content" | curl -s -X POST \
+        -H "Authorization: Bearer ${AUTH_TOKEN}" \
+        -F "file=@-;filename=clean.txt" \
+        "http://${E2E_VM2_IP}:3000/api/v1/scan")
+    assert_json_field "$resp" '.status' 'clean'
+}
+
 @test "metrics endpoint exposes expected metrics" {
-    # /metrics is in the auth skip paths, no token needed
     local metrics
     metrics=$(curl_api "${API_URL}/metrics")
 

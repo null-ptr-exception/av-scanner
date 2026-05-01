@@ -1,0 +1,22 @@
+---
+- name: Restart AV Scanner service
+  hosts: all
+  serial: 1
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restart av-scanner
+      systemd:
+        name: av-scanner
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for service to be ready
+      uri:
+        url: "http://localhost:3000/api/v1/live"
+        method: GET
+        status_code: [200]
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 2

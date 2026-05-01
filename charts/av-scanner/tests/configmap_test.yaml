@@ -1,0 +1,29 @@
+suite: Inventory ConfigMap
+templates:
+  - configmap.yaml
+release:
+  name: av-scanner
+  namespace: av-scanner
+tests:
+  - it: should create inventory configmap by default
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: av-scanner-inventory
+
+  - it: should contain inventory data
+    asserts:
+      - exists:
+          path: data["inventory.yaml"]
+      - matchRegex:
+          path: data["inventory.yaml"]
+          pattern: "ansible_host.*192\\.168\\.64\\.2"
+
+  - it: should not create configmap when existingInventoryPath is set
+    set:
+      existingInventoryPath: /custom/inventory.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

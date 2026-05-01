@@ -1,0 +1,162 @@
+suite: CronJob
+templates:
+  - cronjob.yaml
+release:
+  name: av-scanner
+  namespace: av-scanner
+tests:
+  - it: should render a CronJob with default values
+    asserts:
+      - isKind:
+          of: CronJob
+      - equal:
+          path: metadata.name
+          value: av-scanner-deploy
+      - equal:
+          path: spec.schedule
+          value: "0 */12 * * *"
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+
+  - it: should use custom schedule
+    set:
+      cronjob.schedule: "0 */6 * * *"
+    asserts:
+      - equal:
+          path: spec.schedule
+          value: "0 */6 * * *"
+
+  - it: should set correct image
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          value: ghcr.io/null-ptr-exception/av-scanner-deploy:latest
+
+  - it: should use custom image registry
+    set:
+      image.registry: registry.example.com
+      image.repository: my-org/av-scanner-deploy
+      image.tag: v1.0.0
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          value: registry.example.com/my-org/av-scanner-deploy:v1.0.0
+
+  - it: should set token env vars
+    set:
+      token.serviceAccount: custom-sa
+      token.duration: 48h
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: SA_NAME
+            value: "custom-sa"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: TOKEN_DURATION
+            value: "48h"
+
+  - it: should set SA_NAMESPACE to release namespace
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: SA_NAMESPACE
+            value: "av-scanner"
+
+  - it: should use default inventory path
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INVENTORY_PATH
+            value: "/etc/ansible/inventory.yaml"
+
+  - it: should use custom inventory path
+    set:
+      existingInventoryPath: /custom/inventory.yaml
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: INVENTORY_PATH
+            value: "/custom/inventory.yaml"
+
+  - it: should mount inventory configmap by default
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: inventory
+            mountPath: /etc/ansible
+            readOnly: true
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: inventory
+            configMap:
+              name: av-scanner-inventory
+
+  - it: should not mount inventory configmap when existingInventoryPath is set
+    set:
+      existingInventoryPath: /custom/inventory.yaml
+    asserts:
+      - notContains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: inventory
+            mountPath: /etc/ansible
+            readOnly: true
+
+  - it: should mount ssh key secret
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: ssh-key
+            secret:
+              secretName: av-scanner-ssh-key
+              defaultMode: 256
+
+  - it: should use existing ssh key secret
+    set:
+      sshKey.existingSecret: my-ssh-secret
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: ssh-key
+            secret:
+              secretName: my-ssh-secret
+              defaultMode: 256
+
+  - it: should include extra volumes and mounts
+    set:
+      extraVolumes:
+        - name: custom-vol
+          configMap:
+            name: my-config
+      extraVolumeMounts:
+        - name: custom-vol
+          mountPath: /custom
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: custom-vol
+            configMap:
+              name: my-config
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: custom-vol
+            mountPath: /custom
+
+  - it: should use deployer service account
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.serviceAccountName
+          value: av-scanner-deployer

@@ -1,4 +1,4 @@
-.PHONY: help build build-deploy deploy clean test-unit test-e2e test-perf test-integration vm-init vm-start vm-stop setup-node-exporter
+.PHONY: help build build-deploy deploy clean test-unit test-helm test-molecule test-e2e test-perf test-integration vm-init vm-start vm-stop vm-destroy
 
 IMAGE_NAME ?= av-scanner
 DEPLOY_IMAGE_NAME ?= av-scanner-deploy
@@ -6,17 +6,15 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 IMAGE_TAG ?= $(VERSION)
 VM_NAME ?= av-scanner
-STATE_FILE ?= .vm-state
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "VM Management:"
-	@echo "  vm-init    Create VM (prompts for hypervisor if both available)"
-	@echo "             Use HYPERVISOR=qemu or HYPERVISOR=multipass to skip prompt"
-	@echo "  vm-start   Start existing VM"
-	@echo "  vm-stop    Stop VM"
-	@echo "  setup-node-exporter  Install Prometheus node_exporter on VM"
+	@echo "  vm-init      Create VM (--name, --count, --force supported)"
+	@echo "  vm-start     Start existing VM"
+	@echo "  vm-stop      Graceful shutdown"
+	@echo "  vm-destroy   Destroy VM and remove disk"
 	@echo ""
 	@echo "Build & Deploy:"
 	@echo "  build          Build image containing Go binary (for local dev)"
@@ -26,76 +24,40 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test-unit        Run unit tests"
-	@echo "  test-e2e         Run e2e tests (requires API_URL or VM)"
+	@echo "  test-helm        Run Helm chart lint and unit tests"
+	@echo "  test-molecule    Run Molecule tests (requires VMs: vm-init --name molecule --count 2)"
+	@echo "  test-e2e         Run e2e tests (requires VMs: vm-init --name e2e --count 2)"
 	@echo "  test-perf        Run k6 load tests with Prometheus metrics report"
 
 # ============================================
 # VM Management
 # ============================================
 
-# Create VM (auto-detects hypervisor, or use HYPERVISOR=qemu|multipass)
 vm-init:
-ifdef HYPERVISOR
-	./scripts/vm-init.sh --hypervisor $(HYPERVISOR)
-else
 	./scripts/vm-init.sh
-endif
 
-# Start existing VM
 vm-start:
-	./scripts/vm-start.sh
+	./scripts/vm-start.sh $(VM_NAME)
 
-# Stop VM
 vm-stop:
-	@if [ -f $(STATE_FILE) ]; then \
-		. ./$(STATE_FILE) || { echo "Error: malformed .vm-state file"; exit 1; }; \
-		if [ -z "$$HYPERVISOR" ] || [ -z "$$VM_NAME" ]; then \
-			echo "Error: invalid .vm-state (missing HYPERVISOR or VM_NAME)"; exit 1; \
-		fi; \
-		if [ "$$HYPERVISOR" = "multipass" ]; then \
-			multipass stop $$VM_NAME; \
-		else \
-			if [ -f "$$QEMU_DIR/$$VM_NAME.pid" ]; then \
-				pkill -F "$$QEMU_DIR/$$VM_NAME.pid" 2>/dev/null || true; \
-				rm -f "$$QEMU_DIR/$$VM_NAME.pid"; \
-			fi; \
-		fi; \
-		echo "VM stopped"; \
-	else \
-		echo "No VM state found"; \
-	fi
+	virsh --connect qemu:///system shutdown $(VM_NAME) 2>/dev/null || echo "VM $(VM_NAME) not found"
 
-# Install node_exporter on VM
-setup-node-exporter:
-	@if [ ! -f $(STATE_FILE) ]; then echo "Run 'make vm-init' first"; exit 1; fi
-	@. ./$(STATE_FILE) && \
-	if [ -f venv/bin/activate ]; then . venv/bin/activate; fi && \
-	cd ansible && \
-	if [ "$$HYPERVISOR" = "multipass" ]; then \
-		ansible-playbook node-exporter.yaml -i inventory.yaml \
-			-e ansible_host=$$VM_IP; \
-	else \
-		ansible-playbook node-exporter.yaml -i inventory.yaml \
-			-e ansible_host=$$VM_IP \
-			-e ansible_port=$$SSH_PORT \
-			-e ansible_ssh_private_key_file=$(CURDIR)/.ssh/id_ed25519; \
-	fi
+vm-destroy:
+	./scripts/vm-destroy.sh --name $(VM_NAME)
 
 # ============================================
 # Build
 # ============================================
 
-# Build the binary-only image (for local dev / extraction)
 build:
 	podman build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) .
 
-# Build the deployer image (binary + ansible + kubectl)
 build-deploy:
 	podman build \
-		-f deploy/Dockerfile \
+		-f docker/Dockerfile \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		-t $(DEPLOY_IMAGE_NAME):$(IMAGE_TAG) .
@@ -104,31 +66,22 @@ build-deploy:
 # Deploy
 # ============================================
 
-# Build Go binary locally and deploy to VM via ansible
 deploy:
-	@if [ ! -f $(STATE_FILE) ]; then echo "Run 'make vm-init' first"; exit 1; fi
+	@VM_IP=$$(virsh --connect qemu:///system domifaddr $(VM_NAME) 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1); \
+	if [ -z "$$VM_IP" ]; then echo "VM '$(VM_NAME)' not running. Run 'make vm-init' first."; exit 1; fi; \
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-ldflags="-w -s \
 			-X github.com/rophy/av-scanner/internal/version.Version=$(VERSION) \
 			-X github.com/rophy/av-scanner/internal/version.Commit=$(COMMIT) \
 			-X github.com/rophy/av-scanner/internal/version.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		-o /tmp/av-scanner main.go
-	@. ./$(STATE_FILE) && \
+		-o /tmp/av-scanner main.go && \
 	if [ -f venv/bin/activate ]; then . venv/bin/activate; fi && \
 	cd ansible && \
-	if [ "$$HYPERVISOR" = "multipass" ]; then \
-		ansible-playbook deploy.yaml -i inventory.yaml \
-			-e ansible_host=$$VM_IP \
-			-e binary_path=/tmp/av-scanner; \
-	else \
-		ansible-playbook deploy.yaml -i inventory.yaml \
-			-e ansible_host=$$VM_IP \
-			-e ansible_port=$$SSH_PORT \
-			-e ansible_ssh_private_key_file=$(CURDIR)/.ssh/id_ed25519 \
-			-e binary_path=/tmp/av-scanner; \
-	fi
+	ansible-playbook playbooks/deploy.yaml -i inventories/inventory.yaml \
+		-e ansible_host=$$VM_IP \
+		-e ansible_ssh_private_key_file=.vms/id_ed25519 \
+		-e binary_path=/tmp/av-scanner
 
-# Clean up build artifacts
 clean:
 	podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	podman rmi $(DEPLOY_IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
@@ -137,18 +90,34 @@ clean:
 # Testing
 # ============================================
 
-# Run unit tests
 test-unit:
 	go test -race ./...
 
-# Run e2e tests (requires running server)
-test-e2e:
-	bats test/e2e/
+test-helm:
+	helm lint charts/av-scanner
+	helm unittest charts/av-scanner
 
-# Run k6 load tests with Prometheus metrics report
+NODE_EXPORTER_VERSION ?= 1.9.0
+
+test-molecule:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/av-scanner main.go
+	@if [ ! -f /tmp/node_exporter ]; then \
+		echo "Downloading node_exporter $(NODE_EXPORTER_VERSION)..."; \
+		curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v$(NODE_EXPORTER_VERSION)/node_exporter-$(NODE_EXPORTER_VERSION).linux-amd64.tar.gz" | \
+			tar xz --strip-components=1 -C /tmp "node_exporter-$(NODE_EXPORTER_VERSION).linux-amd64/node_exporter"; \
+	fi
+	cd ansible/roles/av-scanner && \
+		MOLECULE_SSH_KEY=$(CURDIR)/.vms/id_ed25519 \
+		MOLECULE_VM1_IP=$$(virsh --connect qemu:///system domifaddr molecule-1 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1) \
+		MOLECULE_VM2_IP=$$(virsh --connect qemu:///system domifaddr molecule-2 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1) \
+		MOLECULE_AV_SCANNER_BINARY=/tmp/av-scanner \
+		MOLECULE_NODE_EXPORTER_BINARY=/tmp/node_exporter \
+		molecule test -s default
+
+test-e2e:
+	bats --show-output-of-passing-tests test/e2e/
+
 test-perf:
 	./scripts/perf-test.sh
 
-# Alias for backwards compat
 test-integration: test-e2e
-
