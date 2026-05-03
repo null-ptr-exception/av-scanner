@@ -78,6 +78,14 @@ VMs are managed via **libvirt/virsh** (`qemu:///system`). VMs get real IPs on th
 
 **Prerequisites:** `virsh`, `virt-install`, `qemu-img`, `cloud-localds`
 
+## Shell Scripts Policy
+
+**NEVER suppress stderr** in scripts or tests (`2>/dev/null`, `>/dev/null 2>&1`, `&>/dev/null`).
+Errors must always be visible so failures are diagnosable.
+
+- Redirecting stdout only (`>/dev/null`) is OK for exit-code-only checks (e.g. health polls, `command -v`, `docker image inspect`)
+- `|| true` is OK for idempotent cleanup (e.g. `virsh destroy` on an already-stopped VM) but do NOT combine with stderr suppression
+
 ## Container Runtime
 
 This project uses **podman** (not docker) for:
