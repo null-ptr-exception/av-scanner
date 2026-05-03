@@ -31,7 +31,7 @@ tests:
     asserts:
       - equal:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
-          value: ghcr.io/null-ptr-exception/av-scanner-deploy:latest
+          value: ghcr.io/null-ptr-exception/av-scanner:20260503-r1
 
   - it: should use custom image registry
     set:
