@@ -63,13 +63,20 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           fi
 
-      - name: Create e2e VMs
-        run: ./scripts/vm-init.sh --name e2e --count 2 --force
-
-      - name: Allow Docker-to-virbr0 forwarding
+      - name: Install istioctl
         run: |
-          sudo iptables -I DOCKER-USER -o virbr0 -j ACCEPT
-          sudo iptables -I DOCKER-USER -i virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          if ! command -v istioctl &>/dev/null; then
+            curl -fsSLo /tmp/istioctl.tar.gz \
+              https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz
+            curl -fsSLo /tmp/istioctl.tar.gz.sha256 \
+              https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz.sha256
+            echo "$(cat /tmp/istioctl.tar.gz.sha256)  /tmp/istioctl.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/istioctl.tar.gz -C /tmp istioctl
+            sudo install -m 0755 /tmp/istioctl /usr/local/bin/istioctl
+          fi
+
+      - name: Create e2e VMs
+        run: VM_MEMORY=2048 ./scripts/vm-init.sh --name e2e --count 2 --force
 
       - name: Run e2e tests
         run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/01_e2e.bats

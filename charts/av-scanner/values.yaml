@@ -35,3 +35,15 @@ existingInventoryPath: ""
 
 extraVolumes: []
 extraVolumeMounts: []
+
+istio:
+  enabled: false
+  # <namespace>/<name> of the Istio Gateway resource
+  gatewayRef: ""
+  port: 3000
+  serviceHost: av-scanner.corp.localhost
+  workloadEntries: []
+  # - name: vm1
+  #   address: 192.168.64.2
+  # - name: vm2
+  #   address: 192.168.64.3

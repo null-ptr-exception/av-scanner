@@ -1,0 +1,153 @@
+suite: Istio Routing
+templates:
+  - istio.yaml
+release:
+  name: av-scanner
+  namespace: av-scanner
+tests:
+  - it: should not render when istio is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should fail when gatewayRef is empty
+    set:
+      istio.enabled: true
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+    asserts:
+      - failedTemplate:
+          errorMessage: "istio.gatewayRef is required when istio.enabled=true"
+
+  - it: should fail when workloadEntries is empty
+    set:
+      istio.enabled: true
+      istio.gatewayRef: istio-system/av-scanner
+    asserts:
+      - failedTemplate:
+          errorMessage: "istio.workloadEntries must contain at least one entry when istio.enabled=true"
+
+  - it: should render all resources with valid values
+    set:
+      istio.enabled: true
+      istio.gatewayRef: istio-system/av-scanner
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: should render ServiceEntry correctly
+    set:
+      istio.enabled: true
+      istio.gatewayRef: istio-system/av-scanner
+      istio.serviceHost: av-scanner.corp.localhost
+      istio.port: 3000
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: ServiceEntry
+      - equal:
+          path: spec.hosts[0]
+          value: av-scanner.corp.localhost
+      - equal:
+          path: spec.location
+          value: MESH_INTERNAL
+      - equal:
+          path: spec.resolution
+          value: STATIC
+      - equal:
+          path: spec.ports[0].number
+          value: 3000
+      - equal:
+          path: spec.ports[0].protocol
+          value: HTTP
+
+  - it: should render WorkloadEntry per VM
+    set:
+      istio.enabled: true
+      istio.gatewayRef: istio-system/av-scanner
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+        - name: vm2
+          address: 10.0.0.2
+    asserts:
+      - hasDocuments:
+          count: 5
+      - isKind:
+          of: WorkloadEntry
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: av-scanner-vm1
+        documentIndex: 1
+      - equal:
+          path: spec.address
+          value: 10.0.0.1
+        documentIndex: 1
+      - equal:
+          path: spec.labels.instance
+          value: vm1
+        documentIndex: 1
+      - isKind:
+          of: WorkloadEntry
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: av-scanner-vm2
+        documentIndex: 2
+      - equal:
+          path: spec.address
+          value: 10.0.0.2
+        documentIndex: 2
+
+  - it: should render VirtualService with gateway reference
+    set:
+      istio.enabled: true
+      istio.gatewayRef: custom-ns/my-gateway
+      istio.serviceHost: scanner.example.com
+      istio.port: 8080
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+    documentIndex: 2
+    asserts:
+      - isKind:
+          of: VirtualService
+      - equal:
+          path: spec.hosts[0]
+          value: scanner.example.com
+      - equal:
+          path: spec.gateways[0]
+          value: custom-ns/my-gateway
+      - equal:
+          path: spec.http[0].route[0].destination.host
+          value: scanner.example.com
+      - equal:
+          path: spec.http[0].route[0].destination.port.number
+          value: 8080
+
+  - it: should render DestinationRule with round-robin
+    set:
+      istio.enabled: true
+      istio.gatewayRef: istio-system/av-scanner
+      istio.serviceHost: av-scanner.corp.localhost
+      istio.workloadEntries:
+        - name: vm1
+          address: 10.0.0.1
+    documentIndex: 3
+    asserts:
+      - isKind:
+          of: DestinationRule
+      - equal:
+          path: spec.host
+          value: av-scanner.corp.localhost
+      - equal:
+          path: spec.trafficPolicy.loadBalancer.simple
+          value: ROUND_ROBIN
