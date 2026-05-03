@@ -90,7 +90,7 @@ GWEOF
     echo "# Building deployer image..."
     docker build -f "${project_root}/docker/Dockerfile" \
         -t "$deploy_image" "$project_root"
-    kind load docker-image "$deploy_image" --name "$KIND_CLUSTER" 2>/dev/null || true
+    kind load docker-image "$deploy_image" --name "$KIND_CLUSTER"
 
     # --- kube-federated-auth ---
     local kfa_image="ghcr.io/rophy/kube-federated-auth:3.4.2"
@@ -104,7 +104,7 @@ GWEOF
             docker pull "$kfa_image"
         fi
     fi
-    kind load docker-image "$kfa_image" --name "$KIND_CLUSTER" 2>/dev/null || true
+    kind load docker-image "$kfa_image" --name "$KIND_CLUSTER"
 
     echo "# Deploying kube-federated-auth..."
     _kubectl apply -f "${project_root}/test/kube-federated-auth.yaml"
