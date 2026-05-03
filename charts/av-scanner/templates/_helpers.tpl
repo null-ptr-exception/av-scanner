@@ -17,11 +17,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{- define "av-scanner.sshSecretName" -}}
-{{- if .Values.sshKey.existingSecret -}}
-{{ .Values.sshKey.existingSecret }}
-{{- else -}}
-{{ include "av-scanner.fullname" . }}-ssh-key
-{{- end }}
+{{ required "sshKey.existingSecret is required" .Values.sshKey.existingSecret }}
 {{- end }}
 
 {{- define "av-scanner.inventoryPath" -}}

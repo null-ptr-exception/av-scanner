@@ -13,6 +13,8 @@ token:
   duration: 24h
   serviceAccount: av-scanner
 
+# SSH private key for connecting to VMs (required).
+# The secret must contain a key named "id_ed25519" with the private key.
 sshKey:
   existingSecret: ""
 
