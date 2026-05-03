@@ -46,10 +46,10 @@ setup_file() {
         fi
         "$istioctl_bin" install --context "$KUBE_CONTEXT" --set profile=default \
             --set values.gateways.istio-ingressgateway.type=NodePort -y
-        _kubectl -n istio-system patch svc istio-ingressgateway --type='json' \
-            -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30080}]'
-        _kubectl -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
     fi
+    _kubectl -n istio-system patch svc istio-ingressgateway --type='json' \
+        -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30080}]'
+    _kubectl -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
 
     # --- Istio Gateway (lives in istio-system with the ingress gateway pods) ---
     if ! _kubectl -n istio-system get gateway av-scanner &>/dev/null; then

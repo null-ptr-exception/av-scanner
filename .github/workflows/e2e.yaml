@@ -66,8 +66,13 @@ jobs:
       - name: Install istioctl
         run: |
           if ! command -v istioctl &>/dev/null; then
-            curl -fsSL https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz | tar xz -C /tmp
-            sudo mv /tmp/istioctl /usr/local/bin/istioctl
+            curl -fsSLo /tmp/istioctl.tar.gz \
+              https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz
+            curl -fsSLo /tmp/istioctl.tar.gz.sha256 \
+              https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz.sha256
+            echo "$(cat /tmp/istioctl.tar.gz.sha256)  /tmp/istioctl.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/istioctl.tar.gz -C /tmp istioctl
+            sudo install -m 0755 /tmp/istioctl /usr/local/bin/istioctl
           fi
 
       - name: Create e2e VMs

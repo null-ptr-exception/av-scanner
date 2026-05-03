@@ -1,4 +1,8 @@
 {{- if .Values.istio.enabled }}
+{{- $gatewayRef := required "istio.gatewayRef is required when istio.enabled=true" .Values.istio.gatewayRef -}}
+{{- if eq (len .Values.istio.workloadEntries) 0 -}}
+{{- fail "istio.workloadEntries must contain at least one entry when istio.enabled=true" -}}
+{{- end }}
 apiVersion: networking.istio.io/v1beta1
 kind: ServiceEntry
 metadata:
@@ -46,7 +50,7 @@ spec:
   hosts:
   - {{ .Values.istio.serviceHost }}
   gateways:
-  - {{ .Values.istio.gatewayRef }}
+  - {{ $gatewayRef }}
   http:
   - route:
     - destination:

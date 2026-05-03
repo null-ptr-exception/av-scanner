@@ -33,7 +33,7 @@ The Gateway accepts traffic for a wildcard domain (e.g. `*.corp.localhost`), and
 In testing, `.localhost` domains (RFC 6761) resolve to `127.0.0.1` without DNS configuration:
 
 ```bash
-curl http://av-scanner.corp.localhost:30080/api/v1/health
+curl -4 http://av-scanner.corp.localhost:30080/api/v1/health
 ```
 
 ### Traffic Flow
