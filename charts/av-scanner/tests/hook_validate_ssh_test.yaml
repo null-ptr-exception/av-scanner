@@ -1,0 +1,99 @@
+suite: Pre-install SSH Validation Hook
+templates:
+  - hook-validate-ssh.yaml
+release:
+  name: av-scanner
+  namespace: av-scanner
+set:
+  sshKey.existingSecret: test-ssh-key
+tests:
+  - it: should not render when disabled
+    set:
+      preInstallCheck.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render a Job
+    asserts:
+      - isKind:
+          of: Job
+      - equal:
+          path: metadata.name
+          value: av-scanner-validate-ssh
+
+  - it: should have pre-install hook annotation
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: pre-install
+
+  - it: should use default job settings
+    asserts:
+      - equal:
+          path: spec.backoffLimit
+          value: 0
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 180
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 3600
+
+  - it: should allow custom job settings
+    set:
+      preInstallCheck.backoffLimit: 2
+      preInstallCheck.activeDeadlineSeconds: 300
+      preInstallCheck.ttlSecondsAfterFinished: 7200
+    asserts:
+      - equal:
+          path: spec.backoffLimit
+          value: 2
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 300
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 7200
+
+  - it: should run ansible ping command
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["ansible", "all", "-m", "ping", "-i", "/etc/ansible/inventory.yaml"]
+
+  - it: should mount ssh key and inventory
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: ssh-key
+            mountPath: /ssh
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: inventory
+            mountPath: /etc/ansible
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: ssh-key
+            secret:
+              secretName: test-ssh-key
+              defaultMode: 256
+
+  - it: should use custom inventory path
+    set:
+      existingInventoryPath: /custom/inventory.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["ansible", "all", "-m", "ping", "-i", "/custom/inventory.yaml"]
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: inventory
+            mountPath: /etc/ansible
+            readOnly: true

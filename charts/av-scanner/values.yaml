@@ -35,6 +35,14 @@ inventory: |
 # When set, overrides the inventory value above.
 existingInventoryPath: ""
 
+# Pre-install hook that validates SSH connectivity to all inventory hosts
+# by running "ansible all -m ping" before deploying workloads.
+preInstallCheck:
+  enabled: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 3600
+
 extraVolumes: []
 extraVolumeMounts: []
 

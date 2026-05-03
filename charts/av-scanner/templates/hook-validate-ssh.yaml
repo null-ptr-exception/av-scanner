@@ -1,0 +1,53 @@
+{{- if .Values.preInstallCheck.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "av-scanner.fullname" . }}-validate-ssh
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "av-scanner.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install
+spec:
+  backoffLimit: {{ .Values.preInstallCheck.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.preInstallCheck.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.preInstallCheck.ttlSecondsAfterFinished }}
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: validate-ssh
+          image: {{ include "av-scanner.image" . }}
+          command:
+            - ansible
+            - all
+            - -m
+            - ping
+            - -i
+            - {{ include "av-scanner.inventoryPath" . }}
+          volumeMounts:
+            - name: ssh-key
+              mountPath: /ssh
+              readOnly: true
+            {{- if not .Values.existingInventoryPath }}
+            - name: inventory
+              mountPath: /etc/ansible
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: ssh-key
+          secret:
+            secretName: {{ include "av-scanner.sshSecretName" . }}
+            defaultMode: 0400
+        {{- if not .Values.existingInventoryPath }}
+        - name: inventory
+          configMap:
+            name: {{ include "av-scanner.fullname" . }}-inventory
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}
