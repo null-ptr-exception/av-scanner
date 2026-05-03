@@ -8,7 +8,7 @@
       command: >
         kubectl create token {{ lookup('env', 'SA_NAME') | default('av-scanner', true) }}
           --namespace {{ lookup('env', 'SA_NAMESPACE') | default('av-scanner', true) }}
-          --duration {{ lookup('env', 'TOKEN_DURATION') | default('24h', true) }}
+          --duration {{ lookup('env', 'TOKEN_DURATION') | default('168h', true) }}
       register: token_result
       changed_when: false
 

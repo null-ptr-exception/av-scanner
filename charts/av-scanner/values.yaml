@@ -7,10 +7,10 @@ cronjob:
   schedule: "0 */12 * * *"
 
 controller:
-  enabled: false
+  enabled: true
 
 token:
-  duration: 24h
+  duration: 168h
   serviceAccount: av-scanner
 
 # SSH private key for connecting to VMs (required).
@@ -38,6 +38,11 @@ preInstallCheck:
   backoffLimit: 0
   activeDeadlineSeconds: 180
   ttlSecondsAfterFinished: 3600
+
+# Post-install/upgrade hooks that automatically deploy to VMs.
+# Post-install: mints token + full deploy. Post-upgrade: deploy only (no new token).
+autoDeploy:
+  enabled: true
 
 istio:
   enabled: false

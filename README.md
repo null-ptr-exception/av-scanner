@@ -86,8 +86,8 @@ make deploy
 
 The Helm chart provides two deployment mechanisms:
 
-1. **Controller pod** — a standby Deployment (`controller.enabled=true`) for initial deployment and ad-hoc operations. Exec into it and run `ansible-playbook playbooks/deploy.yaml`.
-2. **CronJob** — runs every 12h to refresh SA tokens on VMs via `ansible-playbook playbooks/token-refresh.yaml` (mint token + copy + rolling restart).
+1. **Controller pod** — an always-on pod for initial deployment and ad-hoc operations.
+2. **CronJob** — runs every 12h to refresh SA tokens on VMs (mint + copy + rolling restart).
 
 ```mermaid
 flowchart LR
@@ -100,18 +100,40 @@ flowchart LR
     VMs1 & VMs2 -->|auth requests| KFA["kube-federated-auth"]
 ```
 
-Token minting happens inside the playbook (not at container startup), so tokens are always fresh regardless of when the playbook runs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure tokens are refreshed before expiry.
+Each playbook run mints a fresh token before deploying it to VMs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (default: 168h) to ensure tokens are refreshed before expiry.
 
-Prerequisites:
-1. Create an SSH key secret: `kubectl -n av-scanner create secret generic my-ssh-key --from-file=id_ed25519=<path>`
-2. Set `sshKey.existingSecret` in values (required)
+#### Install
 
 ```bash
+# Create SSH key secret
+kubectl create ns av-scanner
+kubectl -n av-scanner create secret generic my-ssh-key --from-file=id_ed25519=<path>
+
+# Install chart
 helm install av-scanner oci://ghcr.io/null-ptr-exception/av-scanner/charts/av-scanner \
-    -n av-scanner --create-namespace \
-    --set sshKey.existingSecret=my-ssh-key \
-    --set controller.enabled=true
+    -n av-scanner \
+    --set sshKey.existingSecret=my-ssh-key
 ```
+
+#### Initial deploy via controller pod
+
+```bash
+# Exec into the controller pod
+kubectl -n av-scanner exec -it deploy/av-scanner-controller -- bash
+
+# Run the full deploy playbook (installs ClamAV, binary, token)
+ansible-playbook playbooks/deploy.yaml
+```
+
+#### Available playbooks
+
+| Playbook | Description |
+|----------|-------------|
+| `playbooks/deploy.yaml` | Full deploy: ClamAV + av-scanner binary + config |
+| `playbooks/token-refresh.yaml` | Mint token + copy to VMs + rolling restart |
+| `playbooks/restart.yaml` | Restart av-scanner service on all VMs |
+
+On `helm install`, the chart automatically runs `token-refresh.yaml` then `deploy.yaml` via a post-install hook. On `helm upgrade`, only `deploy.yaml` runs (existing tokens are preserved).
 
 See `charts/av-scanner/values.yaml` for all configurable values.
 
@@ -188,7 +210,7 @@ These env vars are read by the playbooks via `lookup('env', ...)`:
 |----------|---------|-------------|
 | `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
 | `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
-| `TOKEN_DURATION` | 24h | Token expiry (must be longer than CronJob schedule) |
+| `TOKEN_DURATION` | 168h | Token expiry (must be longer than CronJob schedule) |
 
 ## Authentication
 

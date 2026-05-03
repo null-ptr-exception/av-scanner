@@ -1,6 +1,6 @@
-suite: Controller Deployment
+suite: Post-install Deploy Hook
 templates:
-  - controller.yaml
+  - hook-deploy.yaml
 release:
   name: av-scanner
   namespace: av-scanner
@@ -9,30 +9,36 @@ set:
 tests:
   - it: should not render when disabled
     set:
-      controller.enabled: false
+      autoDeploy.enabled: false
     asserts:
       - hasDocuments:
           count: 0
 
-  - it: should render by default
+  - it: should render a Job
     asserts:
       - isKind:
-          of: Deployment
+          of: Job
       - equal:
           path: metadata.name
-          value: av-scanner-controller
+          value: av-scanner-deploy
 
-  - it: should use sleep infinity command
+  - it: should have post-install hook annotation
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].command
-          value: ["sleep", "infinity"]
-
-  - it: should use deployer service account
-    asserts:
+          path: metadata.annotations["helm.sh/hook"]
+          value: post-install
       - equal:
-          path: spec.template.spec.serviceAccountName
-          value: av-scanner-deployer
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation
+
+  - it: should run token-refresh then deploy
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: "token-refresh"
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: "deploy.yaml"
 
   - it: should set token env vars
     set:
@@ -49,6 +55,12 @@ tests:
           content:
             name: TOKEN_DURATION
             value: "48h"
+
+  - it: should use deployer service account
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: av-scanner-deployer
 
   - it: should mount ssh key and inventory
     asserts:

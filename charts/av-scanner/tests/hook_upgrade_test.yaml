@@ -1,6 +1,6 @@
-suite: Controller Deployment
+suite: Post-upgrade Deploy Hook
 templates:
-  - controller.yaml
+  - hook-upgrade.yaml
 release:
   name: av-scanner
   namespace: av-scanner
@@ -9,46 +9,46 @@ set:
 tests:
   - it: should not render when disabled
     set:
-      controller.enabled: false
+      autoDeploy.enabled: false
     asserts:
       - hasDocuments:
           count: 0
 
-  - it: should render by default
+  - it: should render a Job
     asserts:
       - isKind:
-          of: Deployment
+          of: Job
       - equal:
           path: metadata.name
-          value: av-scanner-controller
+          value: av-scanner-upgrade
 
-  - it: should use sleep infinity command
+  - it: should have post-upgrade hook annotation
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: post-upgrade
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation
+
+  - it: should run deploy playbook without minting
     asserts:
       - equal:
           path: spec.template.spec.containers[0].command
-          value: ["sleep", "infinity"]
+          value:
+            - ansible-playbook
+            - playbooks/deploy.yaml
+
+  - it: should not have token env vars
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].env
 
   - it: should use deployer service account
     asserts:
       - equal:
           path: spec.template.spec.serviceAccountName
           value: av-scanner-deployer
-
-  - it: should set token env vars
-    set:
-      token.serviceAccount: custom-sa
-      token.duration: 48h
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: SA_NAME
-            value: "custom-sa"
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: TOKEN_DURATION
-            value: "48h"
 
   - it: should mount ssh key and inventory
     asserts:
