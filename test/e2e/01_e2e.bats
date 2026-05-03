@@ -332,16 +332,20 @@ setup() {
         curl -4 -s -H "Authorization: Bearer ${AUTH_TOKEN}" "${API_URL}/api/v1/health" >/dev/null
     done
 
-    # count new requests per VM
-    local post_vm1 post_vm2
-    post_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
-    post_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+    # count new requests per VM (retry to allow journal flush lag)
+    local post_vm1 post_vm2 new_vm1 new_vm2 total
+    for _ in $(seq 1 10); do
+        post_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
+            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+        post_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
+            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
 
-    local new_vm1=$((post_vm1 - base_vm1))
-    local new_vm2=$((post_vm2 - base_vm2))
-    local total=$((new_vm1 + new_vm2))
+        new_vm1=$((post_vm1 - base_vm1))
+        new_vm2=$((post_vm2 - base_vm2))
+        total=$((new_vm1 + new_vm2))
+        [[ $total -ge 10 ]] && break
+        sleep 1
+    done
 
     echo "VM1: $new_vm1, VM2: $new_vm2, total: $total"
 
