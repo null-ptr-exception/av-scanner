@@ -1,0 +1,53 @@
+---
+- name: Verify ClamAV deployment
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: freshclam service is running
+      systemd:
+        name: clamav-freshclam
+      register: freshclam
+      failed_when: freshclam.status.ActiveState != "active"
+
+    - name: ClamAV daemon is running
+      systemd:
+        name: clamav-daemon
+      register: clamav
+      failed_when: clamav.status.ActiveState != "active"
+
+    - name: clamonacc service is running
+      systemd:
+        name: clamav-clamonacc
+      register: clamonacc
+      failed_when: clamonacc.status.ActiveState != "active"
+
+    - name: On-access config is present in clamd.conf
+      command: grep -q "OnAccessMountPath /tmp/av-scanner" /etc/clamav/clamd.conf
+      changed_when: false
+
+    - name: OnAccessPrevention is enabled
+      command: grep -q "OnAccessPrevention yes" /etc/clamav/clamd.conf
+      changed_when: false
+
+    - name: clamonacc log file exists
+      stat:
+        path: /var/log/clamav/clamonacc.log
+      register: log_file
+      failed_when: not log_file.stat.exists
+
+    - name: clamonacc log file owned by clamav
+      assert:
+        that:
+          - log_file.stat.pw_name == "clamav"
+          - log_file.stat.gr_name == "clamav"
+
+    - name: clamonacc systemd unit file exists
+      stat:
+        path: /etc/systemd/system/clamav-clamonacc.service
+      register: unit_file
+      failed_when: not unit_file.stat.exists
+
+    - name: clamonacc unit references quarantine directory
+      command: grep -q "move=/tmp/av-scanner/quarantine" /etc/systemd/system/clamav-clamonacc.service
+      changed_when: false
