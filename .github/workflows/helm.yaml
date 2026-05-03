@@ -1,0 +1,64 @@
+name: Helm Chart
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "charts/**"
+  push:
+    branches: [master]
+    paths:
+      - "charts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Read chart version
+        id: chart
+        run: |
+          version=$(grep '^version:' charts/av-scanner/Chart.yaml | awk '{print $2}')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: github.ref == 'refs/heads/master'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Check for existing chart
+        if: github.ref == 'refs/heads/master'
+        env:
+          VERSION: ${{ steps.chart.outputs.version }}
+        run: |
+          if helm pull oci://ghcr.io/${{ github.repository }}/charts/av-scanner \
+              --version "${VERSION}" 2>/dev/null; then
+            echo "ERROR: chart version ${VERSION} already exists in registry"
+            exit 1
+          fi
+
+      - name: Lint chart
+        run: helm lint charts/av-scanner
+
+      - name: Install helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.0.3 --verify=false
+
+      - name: Run chart tests
+        run: helm unittest charts/av-scanner
+
+      - name: Package chart
+        run: helm package charts/av-scanner -d /tmp/charts
+
+      - name: Push chart
+        if: github.ref == 'refs/heads/master'
+        run: |
+          helm push /tmp/charts/av-scanner-${{ steps.chart.outputs.version }}.tgz \
+            oci://ghcr.io/${{ github.repository }}/charts
