@@ -30,7 +30,12 @@ jobs:
           version=$(grep '^version:' charts/av-scanner/Chart.yaml | awk '{print $2}')
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Login to GHCR
+        if: github.ref == 'refs/heads/master'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
       - name: Check for existing chart
+        if: github.ref == 'refs/heads/master'
         env:
           VERSION: ${{ steps.chart.outputs.version }}
         run: |
@@ -55,6 +60,5 @@ jobs:
       - name: Push chart
         if: github.ref == 'refs/heads/master'
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
           helm push /tmp/charts/av-scanner-${{ steps.chart.outputs.version }}.tgz \
             oci://ghcr.io/${{ github.repository }}/charts
