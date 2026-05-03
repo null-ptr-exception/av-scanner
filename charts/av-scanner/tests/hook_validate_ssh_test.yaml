@@ -28,6 +28,12 @@ tests:
           path: metadata.annotations["helm.sh/hook"]
           value: pre-install
 
+  - it: should have hook delete policy
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation
+
   - it: should use default job settings
     asserts:
       - equal:
@@ -56,7 +62,7 @@ tests:
           path: spec.ttlSecondsAfterFinished
           value: 7200
 
-  - it: should pass inventory via env var
+  - it: should pass inventory via env var by default
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -74,6 +80,16 @@ tests:
                   vm2:
                     ansible_host: 192.168.64.3
                     ansible_user: ubuntu
+
+  - it: should use existing inventory path directly
+    set:
+      existingInventoryPath: /custom/inventory.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["ansible", "all", "-m", "ping", "-i", "/custom/inventory.yaml"]
+      - isNull:
+          path: spec.template.spec.containers[0].env
 
   - it: should mount ssh key
     asserts:

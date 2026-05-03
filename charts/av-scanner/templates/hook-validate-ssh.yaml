@@ -8,6 +8,7 @@ metadata:
     {{- include "av-scanner.labels" . | nindent 4 }}
   annotations:
     helm.sh/hook: pre-install
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: {{ .Values.preInstallCheck.backoffLimit }}
   activeDeadlineSeconds: {{ .Values.preInstallCheck.activeDeadlineSeconds }}
@@ -18,6 +19,15 @@ spec:
       containers:
         - name: validate-ssh
           image: {{ include "av-scanner.image" . }}
+          {{- if .Values.existingInventoryPath }}
+          command:
+            - ansible
+            - all
+            - -m
+            - ping
+            - -i
+            - {{ .Values.existingInventoryPath }}
+          {{- else }}
           command:
             - sh
             - -c
@@ -27,6 +37,7 @@ spec:
           env:
             - name: INVENTORY
               value: {{ .Values.inventory | quote }}
+          {{- end }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
