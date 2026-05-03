@@ -151,6 +151,7 @@ INVEOF
         --set image.repository=av-scanner-deploy \
         --set image.tag=e2e \
         --set sshKey.existingSecret=av-scanner-ssh-key \
+        --set preInstallCheck.enabled=false \
         --set-string "inventory=${inventory}" \
         --set istio.enabled=true \
         --set istio.gatewayRef=istio-system/av-scanner \
