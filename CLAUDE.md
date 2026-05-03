@@ -16,7 +16,17 @@
 
 ## Running Tests
 
-**Unit tests:** `make test-unit` (or `go test -race ./...`)
+**"Regression tests" means running ALL of the following:** unit, helm, molecule, and e2e.
+
+**Unit tests:** `go test ./...`
+
+**Helm tests:** `helm unittest charts/av-scanner` and `helm lint charts/av-scanner --set sshKey.existingSecret=test`
+
+**Molecule tests** (ansible roles): run from the role directory, requires VMs running.
+```bash
+cd ansible/roles/clamav
+MOLECULE_VM1_IP=<ip> MOLECULE_SSH_KEY=<path> molecule test
+```
 
 **E2e tests** use [BATS](https://github.com/bats-core/bats-core) (bash). Requires `bats`, `curl`, `jq`.
 

@@ -6,47 +6,11 @@
       - clamav-freshclam
     state: present
 
-- name: Check if ClamAV database exists
-  stat:
-    path: /var/lib/clamav/daily.cvd
-  register: clamav_db
-
-- name: Stop freshclam service temporarily
-  systemd:
-    name: clamav-freshclam
-    state: stopped
-  failed_when: false
-  when: not clamav_db.stat.exists
-
-- name: Update ClamAV database (this may take a while)
-  command: freshclam
-  register: freshclam_result
-  changed_when: "'Database updated' in freshclam_result.stdout"
-  failed_when: false
-  timeout: 600
-  when: not clamav_db.stat.exists
-
-- name: Start freshclam service
-  systemd:
-    name: clamav-freshclam
-    state: started
-    enabled: true
-  when: not clamav_db.stat.exists
-
 - name: Ensure freshclam is enabled and running
   systemd:
     name: clamav-freshclam
     state: started
     enabled: true
-
-- name: Wait for ClamAV database files
-  wait_for:
-    path: "/var/lib/clamav/{{ item }}"
-    state: present
-    timeout: 600
-  loop:
-    - daily.cvd
-    - main.cvd
 
 - name: Ensure ClamAV daemon is enabled and started
   systemd:

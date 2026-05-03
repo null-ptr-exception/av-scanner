@@ -4,6 +4,8 @@ templates:
 release:
   name: av-scanner
   namespace: av-scanner
+set:
+  sshKey.existingSecret: test-ssh-key
 tests:
   - it: should not render when disabled
     asserts:
