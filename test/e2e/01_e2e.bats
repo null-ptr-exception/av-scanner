@@ -89,7 +89,7 @@ GWEOF
     local deploy_image="av-scanner-deploy:e2e"
     echo "# Building deployer image..."
     docker build -f "${project_root}/docker/Dockerfile" \
-        -t "$deploy_image" "$project_root" >/dev/null 2>&1
+        -t "$deploy_image" "$project_root"
     kind load docker-image "$deploy_image" --name "$KIND_CLUSTER" 2>/dev/null || true
 
     # --- kube-federated-auth ---
