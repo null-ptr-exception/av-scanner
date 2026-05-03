@@ -100,7 +100,7 @@ flowchart LR
     VMs1 & VMs2 -->|auth requests| KFA["kube-federated-auth"]
 ```
 
-Each playbook run mints a fresh token before deploying it to VMs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (default: 168h) to ensure tokens are refreshed before expiry.
+The `token-refresh.yaml` playbook mints a fresh SA token and distributes it to all VMs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (default: 168h) to ensure tokens are refreshed before expiry.
 
 #### Install
 
