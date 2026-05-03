@@ -38,7 +38,7 @@ curl -4 http://av-scanner.corp.localhost:30080/api/v1/health
 
 ### Traffic Flow
 
-```
+```text
 Client --> http://av-scanner.corp.localhost
                |
                v
@@ -120,12 +120,12 @@ All resources restored successfully after each test.
 
 ### Load balancing distributes traffic
 
-6 requests sent through the gateway, counted via `journalctl` on each VM:
+10 requests sent through the gateway, counted via `journalctl` on each VM:
 
 | VM | Requests |
 |---|---|
-| VM1 | 2 |
-| VM2 | 4 |
+| VM1 | 4 |
+| VM2 | 6 |
 
 ### Auth works through the gateway
 

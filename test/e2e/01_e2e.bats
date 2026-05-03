@@ -52,9 +52,8 @@ setup_file() {
     _kubectl -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
 
     # --- Istio Gateway (lives in istio-system with the ingress gateway pods) ---
-    if ! _kubectl -n istio-system get gateway av-scanner &>/dev/null; then
-        echo "# Creating Istio Gateway in istio-system..."
-        _kubectl apply -f - <<'GWEOF'
+    echo "# Reconciling Istio Gateway in istio-system..."
+    _kubectl apply -f - <<'GWEOF'
 apiVersion: networking.istio.io/v1beta1
 kind: Gateway
 metadata:
@@ -71,7 +70,6 @@ spec:
     hosts:
     - "*.corp.localhost"
 GWEOF
-    fi
 
     # --- Route from kind node to virbr0 so pods can SSH to VMs ---
     local virbr0_subnet
@@ -325,9 +323,9 @@ setup() {
     # baseline request counts
     local base_vm1 base_vm2
     base_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
     base_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
 
     # send 10 requests through the gateway
     for i in $(seq 1 10); do
@@ -337,9 +335,9 @@ setup() {
     # count new requests per VM
     local post_vm1 post_vm2
     post_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
     post_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
 
     local new_vm1=$((post_vm1 - base_vm1))
     local new_vm2=$((post_vm2 - base_vm2))
