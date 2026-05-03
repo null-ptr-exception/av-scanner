@@ -84,29 +84,33 @@ make deploy
 
 ### Production (Helm chart)
 
-In production, a **K8s CronJob** runs every 12 hours to deploy av-scanner to VMs (rolling, one at a time) and refresh SA tokens:
+The Helm chart provides two deployment mechanisms:
+
+1. **Controller pod** — a standby Deployment (`controller.enabled=true`) for initial deployment and ad-hoc operations. Exec into it and run `ansible-playbook playbooks/deploy.yaml`.
+2. **CronJob** — runs every 12h to refresh SA tokens on VMs via `ansible-playbook playbooks/token-refresh.yaml` (mint token + copy + rolling restart).
 
 ```mermaid
 flowchart LR
-    CronJob["CronJob Pod"] -->|1. kubectl create token| K8sAPI["K8s API"]
-    CronJob -->|2. ansible-playbook over SSH| VMs["Target VMs (serial)"]
-    VMs -->|3. auth requests with SA token| KFA["kube-federated-auth"]
+    subgraph "Initial deploy (controller pod)"
+        Controller["kubectl exec"] -->|ansible-playbook deploy.yaml| VMs1["Target VMs"]
+    end
+    subgraph "Token refresh (CronJob, every 12h)"
+        CronJob["CronJob Pod"] -->|ansible-playbook token-refresh.yaml| VMs2["Target VMs"]
+    end
+    VMs1 & VMs2 -->|auth requests| KFA["kube-federated-auth"]
 ```
 
-The deployer image (`docker/Dockerfile`) bundles the Go binary, Ansible, and kubectl. The entrypoint (`docker/entrypoint.sh`):
-1. Mints a fresh SA token via `kubectl create token` (default: 24h expiry)
-2. Runs the Ansible playbook to deploy the binary and token to VMs (one at a time)
+Token minting happens inside the playbook (not at container startup), so tokens are always fresh regardless of when the playbook runs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure tokens are refreshed before expiry.
 
-The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure the token is refreshed before it expires.
-
-To deploy:
+Prerequisites:
+1. Create an SSH key secret: `kubectl -n av-scanner create secret generic my-ssh-key --from-file=id_ed25519=<path>`
+2. Set `sshKey.existingSecret` in values (required)
 
 ```bash
-# Build the deployer image
-make build-deploy
-
-# Install the Helm chart
-helm install av-scanner charts/av-scanner -n av-scanner --create-namespace
+helm install av-scanner oci://ghcr.io/null-ptr-exception/av-scanner/charts/av-scanner \
+    -n av-scanner --create-namespace \
+    --set sshKey.existingSecret=my-ssh-key \
+    --set controller.enabled=true
 ```
 
 See `charts/av-scanner/values.yaml` for all configurable values.
@@ -178,14 +182,13 @@ make vm-destroy
 
 ### Deployer CronJob Configuration
 
-These env vars are set on the deployer CronJob container (see `charts/av-scanner/values.yaml`):
+These env vars are read by the playbooks via `lookup('env', ...)`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
 | `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
 | `TOKEN_DURATION` | 24h | Token expiry (must be longer than CronJob schedule) |
-| `INVENTORY_PATH` | inventory.yaml | Path to Ansible inventory file |
 
 ## Authentication
 
