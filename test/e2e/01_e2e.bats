@@ -35,6 +35,44 @@ setup_file() {
     fi
     kind export kubeconfig --name "$KIND_CLUSTER" 2>/dev/null
 
+    # --- Istio ingress gateway ---
+    if ! _kubectl get namespace istio-system &>/dev/null; then
+        echo "# Installing Istio..."
+        local istioctl_bin
+        istioctl_bin=$(command -v istioctl 2>/dev/null || echo "/tmp/istioctl")
+        if [[ ! -x "$istioctl_bin" ]]; then
+            echo "# ERROR: istioctl not found"
+            false
+        fi
+        "$istioctl_bin" install --context "$KUBE_CONTEXT" --set profile=default \
+            --set values.gateways.istio-ingressgateway.type=NodePort -y
+        _kubectl -n istio-system patch svc istio-ingressgateway --type='json' \
+            -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30080}]'
+        _kubectl -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
+    fi
+
+    # --- Istio Gateway (lives in istio-system with the ingress gateway pods) ---
+    if ! _kubectl -n istio-system get gateway av-scanner &>/dev/null; then
+        echo "# Creating Istio Gateway in istio-system..."
+        _kubectl apply -f - <<'GWEOF'
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: av-scanner
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*.corp.localhost"
+GWEOF
+    fi
+
     # --- Route from kind node to virbr0 so pods can SSH to VMs ---
     local virbr0_subnet
     virbr0_subnet=$(ip -4 route show dev virbr0 proto kernel | awk '{print $1}')
@@ -116,6 +154,12 @@ INVEOF
         --set image.tag=e2e \
         --set sshKey.existingSecret=av-scanner-ssh-key \
         --set-string "inventory=${inventory}" \
+        --set istio.enabled=true \
+        --set istio.gatewayRef=istio-system/av-scanner \
+        --set "istio.workloadEntries[0].name=vm1" \
+        --set "istio.workloadEntries[0].address=${E2E_VM1_IP}" \
+        --set "istio.workloadEntries[1].name=vm2" \
+        --set "istio.workloadEntries[1].address=${E2E_VM2_IP}" \
         --wait --timeout 120s
 
     # --- Test service accounts ---
@@ -190,7 +234,6 @@ INVEOF
     fi
 
     # --- Verify av-scanner is ready on both VMs ---
-    export API_URL="http://${E2E_VM1_IP}:3000"
     for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
         echo "# Waiting for av-scanner at http://${vm_ip}:3000..."
         local i
@@ -207,7 +250,22 @@ INVEOF
         fi
     done
 
-    echo "# Setup complete: API_URL=${API_URL}"
+    # --- Verify Istio gateway is routing ---
+    export API_URL="http://av-scanner.corp.localhost:30080"
+    echo "# Waiting for Istio gateway at ${API_URL}..."
+    for i in $(seq 1 15); do
+        if curl -4 -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+            echo "# Istio gateway ready"
+            break
+        fi
+        sleep 2
+    done
+    if ! curl -4 -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+        echo "# ERROR: Istio gateway not routing at ${API_URL}"
+        false
+    fi
+
+    echo "# Setup complete: API_URL=${API_URL} (via Istio gateway)"
 }
 
 teardown_file() {
@@ -240,7 +298,7 @@ setup() {
 
 @test "scan clean file returns clean" {
     local resp
-    resp=$(echo "clean test content" | curl -s -X POST \
+    resp=$(echo "clean test content" | curl -4 -s -X POST \
         -H "Authorization: Bearer ${AUTH_TOKEN}" \
         -F "file=@-;filename=clean.txt" \
         "${API_URL}/api/v1/scan")
@@ -252,30 +310,61 @@ setup() {
     eicar=$(echo 'X5x!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | sed 's/x/O/')
 
     local resp
-    resp=$(echo "$eicar" | curl -s -X POST \
+    resp=$(echo "$eicar" | curl -4 -s -X POST \
         -H "Authorization: Bearer ${AUTH_TOKEN}" \
         -F "file=@-;filename=eicar.com" \
         "${API_URL}/api/v1/scan")
     assert_json_field "$resp" '.status' 'infected'
 }
 
-@test "scan works on second VM" {
-    local resp
-    resp=$(echo "clean test content" | curl -s -X POST \
-        -H "Authorization: Bearer ${AUTH_TOKEN}" \
-        -F "file=@-;filename=clean.txt" \
-        "http://${E2E_VM2_IP}:3000/api/v1/scan")
-    assert_json_field "$resp" '.status' 'clean'
+@test "gateway load-balances across both VMs" {
+    load 'vm_helper'
+
+    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+
+    # baseline request counts
+    local base_vm1 base_vm2
+    base_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
+        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+    base_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
+        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+
+    # send 10 requests through the gateway
+    for i in $(seq 1 10); do
+        curl -4 -s -H "Authorization: Bearer ${AUTH_TOKEN}" "${API_URL}/api/v1/health" >/dev/null
+    done
+
+    # count new requests per VM
+    local post_vm1 post_vm2
+    post_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
+        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+    post_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
+        "sudo journalctl -u av-scanner --no-pager | grep -c 'Request completed'" 2>/dev/null)
+
+    local new_vm1=$((post_vm1 - base_vm1))
+    local new_vm2=$((post_vm2 - base_vm2))
+    local total=$((new_vm1 + new_vm2))
+
+    echo "VM1: $new_vm1, VM2: $new_vm2, total: $total"
+
+    # both VMs must have received at least 1 request
+    [[ $new_vm1 -gt 0 ]] || { echo "ERROR: VM1 got 0 requests"; false; }
+    [[ $new_vm2 -gt 0 ]] || { echo "ERROR: VM2 got 0 requests"; false; }
+    [[ $total -eq 10 ]] || { echo "ERROR: expected 10 total, got $total"; false; }
 }
 
 @test "metrics endpoint exposes expected metrics" {
-    local metrics
-    metrics=$(curl_api "${API_URL}/metrics")
+    # Check metrics directly on both VMs — gateway LB may route to a VM
+    # that hasn't processed scans yet, so av_scans_total may be absent.
+    local all_metrics=""
+    for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
+        all_metrics+=$(curl -4 -s "http://${vm_ip}:3000/metrics")
+    done
 
     local missing=""
-    echo "$metrics" | grep -q "av_http_requests_total" || missing="$missing av_http_requests_total"
-    echo "$metrics" | grep -q "av_http_request_duration_seconds" || missing="$missing av_http_request_duration_seconds"
-    echo "$metrics" | grep -q "av_scans_total" || missing="$missing av_scans_total"
+    echo "$all_metrics" | grep -q "av_http_requests_total" || missing="$missing av_http_requests_total"
+    echo "$all_metrics" | grep -q "av_http_request_duration_seconds" || missing="$missing av_http_request_duration_seconds"
+    echo "$all_metrics" | grep -q "av_scans_total" || missing="$missing av_scans_total"
 
     if [[ -n "$missing" ]]; then
         echo "ERROR: Missing metrics:$missing"
@@ -292,7 +381,7 @@ setup() {
     token=$(get_sa_token "test-client" "scanner-client")
 
     local status_code
-    status_code=$(curl -s -o /dev/null -w '%{http_code}' \
+    status_code=$(curl -4 -s -o /dev/null -w '%{http_code}' \
         -H "Authorization: Bearer ${token}" \
         "${API_URL}/api/v1/health")
 
@@ -309,7 +398,7 @@ setup() {
     token=$(get_sa_token "denied-client" "denied-sa")
 
     local status_code
-    status_code=$(curl -s -o /dev/null -w '%{http_code}' \
+    status_code=$(curl -4 -s -o /dev/null -w '%{http_code}' \
         -H "Authorization: Bearer ${token}" \
         "${API_URL}/api/v1/health")
 
@@ -320,7 +409,7 @@ setup() {
 
 @test "missing token gets 401" {
     local status_code
-    status_code=$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/api/v1/health")
+    status_code=$(curl -4 -s -o /dev/null -w '%{http_code}' "${API_URL}/api/v1/health")
 
     [[ "$status_code" == "401" ]] || {
         echo "ERROR: expected 401, got $status_code"; false
@@ -330,7 +419,7 @@ setup() {
 @test "probe endpoints skip auth" {
     for endpoint in /api/v1/live /api/v1/ready; do
         local status_code
-        status_code=$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}${endpoint}")
+        status_code=$(curl -4 -s -o /dev/null -w '%{http_code}' "${API_URL}${endpoint}")
 
         [[ "$status_code" == "200" ]] || {
             echo "ERROR: expected 200 for ${endpoint}, got $status_code"; false

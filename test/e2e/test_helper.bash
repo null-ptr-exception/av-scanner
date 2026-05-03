@@ -11,7 +11,7 @@ KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 
 # curl wrapper for API calls
 curl_api() {
-    curl -s "$@"
+    curl -4 -s "$@"
 }
 
 # Upload a file to the scan endpoint
