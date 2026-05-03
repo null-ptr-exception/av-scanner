@@ -49,7 +49,7 @@ jobs:
         run: helm lint charts/av-scanner
 
       - name: Install helm-unittest
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.0.3
 
       - name: Run chart tests
         run: helm unittest charts/av-scanner
