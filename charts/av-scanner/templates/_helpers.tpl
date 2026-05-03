@@ -20,10 +20,3 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{ required "sshKey.existingSecret is required" .Values.sshKey.existingSecret }}
 {{- end }}
 
-{{- define "av-scanner.inventoryPath" -}}
-{{- if .Values.existingInventoryPath -}}
-{{ .Values.existingInventoryPath }}
-{{- else -}}
-/etc/ansible/inventory.yaml
-{{- end }}
-{{- end }}

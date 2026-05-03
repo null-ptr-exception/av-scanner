@@ -30,31 +30,19 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: TOKEN_DURATION
               value: {{ .Values.token.duration | quote }}
-            - name: INVENTORY_PATH
-              value: {{ include "av-scanner.inventoryPath" . | quote }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
               readOnly: true
-            {{- if not .Values.existingInventoryPath }}
             - name: inventory
               mountPath: /etc/ansible
               readOnly: true
-            {{- end }}
-            {{- with .Values.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
       volumes:
         - name: ssh-key
           secret:
             secretName: {{ include "av-scanner.sshSecretName" . }}
             defaultMode: 0400
-        {{- if not .Values.existingInventoryPath }}
         - name: inventory
           configMap:
             name: {{ include "av-scanner.fullname" . }}-inventory
-        {{- end }}
-        {{- with .Values.extraVolumes }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
 {{- end }}

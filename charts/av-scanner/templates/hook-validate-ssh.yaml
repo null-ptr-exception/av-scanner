@@ -19,38 +19,22 @@ spec:
       containers:
         - name: validate-ssh
           image: {{ include "av-scanner.image" . }}
-          {{- if .Values.existingInventoryPath }}
-          command:
-            - ansible
-            - all
-            - -m
-            - ping
-            - -i
-            - {{ .Values.existingInventoryPath }}
-          {{- else }}
           command:
             - sh
             - -c
             - |
-              echo "$INVENTORY" > /tmp/inventory.yaml
-              ansible all -m ping -i /tmp/inventory.yaml
+              echo "$INVENTORY" > /tmp/hosts
+              ansible all -m ping -i /tmp/hosts
           env:
             - name: INVENTORY
               value: {{ .Values.inventory | quote }}
-          {{- end }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
               readOnly: true
-            {{- with .Values.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
       volumes:
         - name: ssh-key
           secret:
             secretName: {{ include "av-scanner.sshSecretName" . }}
             defaultMode: 0400
-        {{- with .Values.extraVolumes }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
 {{- end }}

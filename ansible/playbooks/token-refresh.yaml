@@ -18,14 +18,32 @@
         dest: /tmp/sa-token
         mode: "0600"
 
-- name: Deploy AV Scanner to VM
+- name: Refresh SA token on VMs
   hosts: all
   serial: 1
   become: true
-  gather_facts: true
-  vars:
-    token_file: /tmp/sa-token
-  roles:
-    - role: clamav
-      when: av_engine | default('clamav') == "clamav"
-    - av-scanner
+  gather_facts: false
+  tasks:
+    - name: Copy SA token to VM
+      copy:
+        src: /tmp/sa-token
+        dest: "{{ k8s_auth_token_path }}"
+        mode: "0600"
+      notify: Restart av-scanner
+
+  handlers:
+    - name: Restart av-scanner
+      systemd:
+        name: av-scanner
+        state: restarted
+
+  post_tasks:
+    - name: Wait for service to be ready
+      uri:
+        url: "http://localhost:3000/api/v1/live"
+        method: GET
+        status_code: [200]
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 2

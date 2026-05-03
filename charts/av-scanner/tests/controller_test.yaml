@@ -38,7 +38,7 @@ tests:
           path: spec.template.spec.serviceAccountName
           value: av-scanner-deployer
 
-  - it: should set env vars matching cronjob
+  - it: should set token env vars
     set:
       controller.enabled: true
       token.serviceAccount: custom-sa
@@ -66,35 +66,6 @@ tests:
             mountPath: /ssh
             readOnly: true
       - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: inventory
-            mountPath: /etc/ansible
-            readOnly: true
-
-  - it: should use existing inventory path with extra volumes
-    set:
-      controller.enabled: true
-      existingInventoryPath: /custom/inventory.yaml
-      extraVolumes:
-        - name: custom-inv
-          configMap:
-            name: my-inventory
-      extraVolumeMounts:
-        - name: custom-inv
-          mountPath: /custom
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: INVENTORY_PATH
-            value: "/custom/inventory.yaml"
-      - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: custom-inv
-            mountPath: /custom
-      - notContains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: inventory
