@@ -23,6 +23,8 @@
   serial: 1
   become: true
   gather_facts: false
+  vars:
+    k8s_auth_token_path: /etc/av-scanner/sa-token
   tasks:
     - name: Copy SA token to VM
       copy:
