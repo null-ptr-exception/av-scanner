@@ -56,13 +56,26 @@ tests:
           path: spec.ttlSecondsAfterFinished
           value: 7200
 
-  - it: should run ansible ping command
+  - it: should pass inventory via env var
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].command
-          value: ["ansible", "all", "-m", "ping", "-i", "/etc/ansible/inventory.yaml"]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: INVENTORY
+            value: |
+              all:
+                vars:
+                  ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+                  ansible_ssh_private_key_file: /ssh/id_ed25519
+                hosts:
+                  vm1:
+                    ansible_host: 192.168.64.2
+                    ansible_user: ubuntu
+                  vm2:
+                    ansible_host: 192.168.64.3
+                    ansible_user: ubuntu
 
-  - it: should mount ssh key and inventory
+  - it: should mount ssh key
     asserts:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -71,29 +84,9 @@ tests:
             mountPath: /ssh
             readOnly: true
       - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: inventory
-            mountPath: /etc/ansible
-            readOnly: true
-      - contains:
           path: spec.template.spec.volumes
           content:
             name: ssh-key
             secret:
               secretName: test-ssh-key
               defaultMode: 256
-
-  - it: should use custom inventory path
-    set:
-      existingInventoryPath: /custom/inventory.yaml
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].command
-          value: ["ansible", "all", "-m", "ping", "-i", "/custom/inventory.yaml"]
-      - notContains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: inventory
-            mountPath: /etc/ansible
-            readOnly: true

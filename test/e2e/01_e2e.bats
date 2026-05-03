@@ -151,7 +151,6 @@ INVEOF
         --set image.repository=av-scanner-deploy \
         --set image.tag=e2e \
         --set sshKey.existingSecret=av-scanner-ssh-key \
-        --set preInstallCheck.enabled=false \
         --set-string "inventory=${inventory}" \
         --set istio.enabled=true \
         --set istio.gatewayRef=istio-system/av-scanner \
@@ -159,7 +158,7 @@ INVEOF
         --set "istio.workloadEntries[0].address=${E2E_VM1_IP}" \
         --set "istio.workloadEntries[1].name=vm2" \
         --set "istio.workloadEntries[1].address=${E2E_VM2_IP}" \
-        --wait --timeout 120s
+        --wait --timeout 300s
 
     # --- Test service accounts ---
     _kubectl create namespace test-client 2>/dev/null || true
