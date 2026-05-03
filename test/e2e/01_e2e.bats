@@ -27,19 +27,19 @@ setup_file() {
     export KIND_CLUSTER="av-scanner-e2e"
     export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
 
-    if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER}$"; then
+    if ! kind get clusters | grep -q "^${KIND_CLUSTER}$"; then
         echo "# Creating kind cluster ${KIND_CLUSTER}..."
         kind create cluster --name "$KIND_CLUSTER" \
             --config "${project_root}/test/kind-config.yaml" \
             --wait 60s
     fi
-    kind export kubeconfig --name "$KIND_CLUSTER" 2>/dev/null
+    kind export kubeconfig --name "$KIND_CLUSTER"
 
     # --- Istio ingress gateway ---
     if ! _kubectl get namespace istio-system &>/dev/null; then
         echo "# Installing Istio..."
         local istioctl_bin
-        istioctl_bin=$(command -v istioctl 2>/dev/null || echo "/tmp/istioctl")
+        istioctl_bin=$(command -v istioctl || echo "/tmp/istioctl")
         if [[ ! -x "$istioctl_bin" ]]; then
             echo "# ERROR: istioctl not found"
             false
@@ -80,8 +80,8 @@ GWEOF
         host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
         if [[ -n "$host_gateway" ]]; then
             echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
-            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" 2>/dev/null || true
-            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE 2>/dev/null || true
+            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" || true
+            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE || true
         fi
     fi
 
@@ -94,7 +94,7 @@ GWEOF
 
     # --- kube-federated-auth ---
     local kfa_image="ghcr.io/rophy/kube-federated-auth:3.4.2"
-    if ! docker image inspect "$kfa_image" >/dev/null 2>&1; then
+    if ! docker image inspect "$kfa_image" >/dev/null; then
         local kfa_dir="${project_root}/../kube-federated-auth"
         if [[ -d "$kfa_dir" ]]; then
             echo "# Building ${kfa_image} from local source..."
@@ -117,8 +117,8 @@ GWEOF
     local kfa_endpoint="http://${vm_gateway}:30082"
 
     # --- Clean slate for Helm ---
-    helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner 2>/dev/null || true
-    _kubectl delete namespace av-scanner --ignore-not-found 2>/dev/null || true
+    helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner || true
+    _kubectl delete namespace av-scanner --ignore-not-found
     _kubectl create namespace av-scanner
 
     # --- SSH key secret ---
@@ -161,8 +161,8 @@ INVEOF
         --wait --timeout 300s
 
     # --- Test service accounts ---
-    _kubectl create namespace test-client 2>/dev/null || true
-    _kubectl -n test-client create serviceaccount scanner-client 2>/dev/null || true
+    _kubectl create namespace test-client --dry-run=client -o yaml | _kubectl apply -f -
+    _kubectl -n test-client create serviceaccount scanner-client --dry-run=client -o yaml | _kubectl apply -f -
 
     # --- Mint SA token inside controller pod ---
     local controller_pod
@@ -236,13 +236,13 @@ INVEOF
         echo "# Waiting for av-scanner at http://${vm_ip}:3000..."
         local i
         for i in $(seq 1 30); do
-            if curl -s --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null 2>&1; then
+            if curl -sf --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null; then
                 echo "# av-scanner ready on ${vm_ip}"
                 break
             fi
             sleep 2
         done
-        if ! curl -s --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null 2>&1; then
+        if ! curl -sf --connect-timeout 2 "http://${vm_ip}:3000/api/v1/live" >/dev/null; then
             echo "# ERROR: av-scanner not ready at http://${vm_ip}:3000"
             false
         fi
@@ -252,13 +252,13 @@ INVEOF
     export API_URL="http://av-scanner.corp.localhost:30080"
     echo "# Waiting for Istio gateway at ${API_URL}..."
     for i in $(seq 1 15); do
-        if curl -4 -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+        if curl -4 -sf --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null; then
             echo "# Istio gateway ready"
             break
         fi
         sleep 2
     done
-    if ! curl -4 -s --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+    if ! curl -4 -sf --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null; then
         echo "# ERROR: Istio gateway not routing at ${API_URL}"
         false
     fi
@@ -273,9 +273,9 @@ teardown_file() {
 
     if [[ "${E2E_CLEAN_ALL:-0}" == "1" ]]; then
         echo "# Cleaning up Helm release..."
-        helm uninstall av-scanner --kube-context "kind-av-scanner-e2e" -n av-scanner 2>/dev/null || true
+        helm uninstall av-scanner --kube-context "kind-av-scanner-e2e" -n av-scanner || true
         echo "# Deleting kind cluster..."
-        kind delete cluster --name av-scanner-e2e 2>/dev/null || true
+        kind delete cluster --name av-scanner-e2e || true
     fi
 }
 
@@ -323,9 +323,9 @@ setup() {
     # baseline request counts
     local base_vm1 base_vm2
     base_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'")
     base_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
-        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+        "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'")
 
     # send 10 requests through the gateway
     for i in $(seq 1 10); do
@@ -336,9 +336,9 @@ setup() {
     local post_vm1 post_vm2 new_vm1 new_vm2 total
     for _ in $(seq 1 10); do
         post_vm1=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM1_IP}" \
-            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'")
         post_vm2=$(ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${E2E_VM2_IP}" \
-            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'" 2>/dev/null)
+            "sudo journalctl -u av-scanner --no-pager | awk '/Request completed/{c++} END{print c+0}'")
 
         new_vm1=$((post_vm1 - base_vm1))
         new_vm2=$((post_vm2 - base_vm2))
@@ -393,8 +393,8 @@ setup() {
 }
 
 @test "denied service account gets 403" {
-    _kubectl create namespace denied-client 2>/dev/null || true
-    _kubectl -n denied-client create serviceaccount denied-sa 2>/dev/null || true
+    _kubectl create namespace denied-client --dry-run=client -o yaml | _kubectl apply -f -
+    _kubectl -n denied-client create serviceaccount denied-sa --dry-run=client -o yaml | _kubectl apply -f -
 
     local token
     token=$(get_sa_token "denied-client" "denied-sa")

@@ -2,8 +2,8 @@
 
 IMAGE_NAME ?= av-scanner
 DEPLOY_IMAGE_NAME ?= av-scanner-deploy
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION ?= $(shell git describe --tags --always --dirty || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD || echo "unknown")
 IMAGE_TAG ?= $(VERSION)
 VM_NAME ?= av-scanner
 
@@ -40,7 +40,7 @@ vm-start:
 	./scripts/vm-start.sh $(VM_NAME)
 
 vm-stop:
-	virsh --connect qemu:///system shutdown $(VM_NAME) 2>/dev/null || echo "VM $(VM_NAME) not found"
+	virsh --connect qemu:///system shutdown $(VM_NAME) || echo "VM $(VM_NAME) not found"
 
 vm-destroy:
 	./scripts/vm-destroy.sh --name $(VM_NAME)
@@ -67,7 +67,7 @@ build-deploy:
 # ============================================
 
 deploy:
-	@VM_IP=$$(virsh --connect qemu:///system domifaddr $(VM_NAME) 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1); \
+	@VM_IP=$$(virsh --connect qemu:///system domifaddr $(VM_NAME) | grep -oP '(\d+\.){3}\d+' | head -1); \
 	if [ -z "$$VM_IP" ]; then echo "VM '$(VM_NAME)' not running. Run 'make vm-init' first."; exit 1; fi; \
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-ldflags="-w -s \
@@ -83,8 +83,8 @@ deploy:
 		-e binary_path=/tmp/av-scanner
 
 clean:
-	podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
-	podman rmi $(DEPLOY_IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
+	podman rmi $(IMAGE_NAME):$(IMAGE_TAG) || true
+	podman rmi $(DEPLOY_IMAGE_NAME):$(IMAGE_TAG) || true
 
 # ============================================
 # Testing
@@ -108,8 +108,8 @@ test-molecule:
 	fi
 	cd ansible/roles/av-scanner && \
 		MOLECULE_SSH_KEY=$(CURDIR)/.vms/id_ed25519 \
-		MOLECULE_VM1_IP=$$(virsh --connect qemu:///system domifaddr molecule-1 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1) \
-		MOLECULE_VM2_IP=$$(virsh --connect qemu:///system domifaddr molecule-2 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1) \
+		MOLECULE_VM1_IP=$$(virsh --connect qemu:///system domifaddr molecule-1 | grep -oP '(\d+\.){3}\d+' | head -1) \
+		MOLECULE_VM2_IP=$$(virsh --connect qemu:///system domifaddr molecule-2 | grep -oP '(\d+\.){3}\d+' | head -1) \
 		MOLECULE_AV_SCANNER_BINARY=/tmp/av-scanner \
 		MOLECULE_NODE_EXPORTER_BINARY=/tmp/node_exporter \
 		molecule test -s default

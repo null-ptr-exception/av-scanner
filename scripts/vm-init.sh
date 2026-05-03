@@ -139,7 +139,7 @@ main() {
 
         log_info "Waiting for $name cloud-init..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i "$SSH_KEY" "ubuntu@${vm_ip}" "cloud-init status --wait" &>/dev/null || true
+            -i "$SSH_KEY" "ubuntu@${vm_ip}" "cloud-init status --wait" || true
 
         log_success "$name ready"
     done

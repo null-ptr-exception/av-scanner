@@ -51,7 +51,7 @@ preflight() {
 
     # VM discovery via virsh
     source "$SCRIPT_DIR/lib/virsh.sh"
-    VM_IP=$(virsh_get_ip "av-scanner" 2>/dev/null || true)
+    VM_IP=$(virsh_get_ip "av-scanner")
     if [[ -z "$VM_IP" ]]; then
         log_error "VM 'av-scanner' not running. Run 'make vm-init && make deploy' first."
         exit 1
@@ -59,14 +59,14 @@ preflight() {
     export VM_IP
     export API_URL="http://${VM_IP}:3000"
 
-    if ! curl -s --connect-timeout 3 "${API_URL}/api/v1/live" >/dev/null 2>&1; then
+    if ! curl -sf --connect-timeout 3 "${API_URL}/api/v1/live" >/dev/null; then
         log_error "av-scanner not reachable at ${API_URL}"
         exit 1
     fi
     log_ok "av-scanner reachable at ${API_URL}"
 
     # Prometheus (optional)
-    if curl -s --connect-timeout 3 "${PROM_URL}/-/ready" >/dev/null 2>&1; then
+    if curl -sf --connect-timeout 3 "${PROM_URL}/-/ready" >/dev/null; then
         log_ok "Prometheus reachable at ${PROM_URL}"
         HAS_PROM=true
     else
@@ -85,7 +85,7 @@ generate_test_data() {
     mkdir -p "$DATA_DIR"
 
     # Clean zip: ~1MB of random data in a zip
-    dd if=/dev/urandom bs=1M count=1 of="${DATA_DIR}/random.dat" 2>/dev/null
+    dd if=/dev/urandom bs=1M count=1 of="${DATA_DIR}/random.dat"
     (cd "${DATA_DIR}" && zip -j clean.zip random.dat) >/dev/null
 
     # Eicar zip: EICAR + padding in a zip (~1MB compressed)
@@ -140,7 +140,7 @@ if r['status'] != 'success' or not r['data']['result']:
     print('N/A')
 else:
     print(r['data']['result'][0]['value'][1])
-" 2>/dev/null || echo "N/A"
+" || echo "N/A"
 }
 
 prom_query_multi() {
@@ -154,7 +154,7 @@ for m in r['data']['result']:
     labels = ', '.join(f'{k}={v}' for k,v in m['metric'].items() if k != '__name__')
     val = m['value'][1]
     print(f'    {labels}: {val}')
-" 2>/dev/null
+"
 }
 
 show_prometheus_report() {
