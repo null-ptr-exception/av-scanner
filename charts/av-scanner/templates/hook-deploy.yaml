@@ -22,7 +22,7 @@ spec:
           image: {{ include "av-scanner.image" . }}
           command:
             - sh
-            - -c
+            - -ec
             - |
               ansible-playbook playbooks/token-refresh.yaml
               ansible-playbook playbooks/deploy.yaml

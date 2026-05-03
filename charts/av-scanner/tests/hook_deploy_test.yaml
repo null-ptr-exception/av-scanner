@@ -35,10 +35,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].command[2]
-          pattern: "token-refresh"
-      - matchRegex:
-          path: spec.template.spec.containers[0].command[2]
-          pattern: "deploy.yaml"
+          pattern: "token-refresh\\.yaml[\\s\\S]*deploy\\.yaml"
 
   - it: should set token env vars
     set:
