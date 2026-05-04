@@ -2,5 +2,5 @@ apiVersion: v2
 name: av-scanner
 description: Deploys av-scanner to VMs via a K8s CronJob running Ansible
 type: application
-version: 0.3.0
-appVersion: "0.1.0"
+version: 0.4.0
+appVersion: "20260504-r1"
