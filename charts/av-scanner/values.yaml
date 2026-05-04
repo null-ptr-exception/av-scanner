@@ -1,7 +1,8 @@
 image:
   registry: ghcr.io
   repository: null-ptr-exception/av-scanner
-  tag: 20260504-r1
+  # tag defaults to Chart.appVersion; override to pin a specific image
+  tag: ""
 
 cronjob:
   schedule: "0 */12 * * *"

@@ -9,10 +9,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{- define "av-scanner.image" -}}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
 {{- if .Values.image.registry -}}
-{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ $tag }}
 {{- else -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{ .Values.image.repository }}:{{ $tag }}
 {{- end -}}
 {{- end }}
 
