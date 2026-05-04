@@ -38,12 +38,12 @@ tests:
   - it: should use custom image registry
     set:
       image.registry: registry.example.com
-      image.repository: my-org/av-scanner-deploy
+      image.repository: my-org/av-scanner
       image.tag: v1.0.0
     asserts:
       - equal:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
-          value: registry.example.com/my-org/av-scanner-deploy:v1.0.0
+          value: registry.example.com/my-org/av-scanner:v1.0.0
 
   - it: should set token env vars
     set:
@@ -69,25 +69,15 @@ tests:
             name: SA_NAMESPACE
             value: "av-scanner"
 
-  - it: should use default inventory path
+  - it: should run token-refresh playbook
     asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INVENTORY_PATH
-            value: "/etc/ansible/inventory.yaml"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command
+          value:
+            - ansible-playbook
+            - playbooks/token-refresh.yaml
 
-  - it: should use custom inventory path
-    set:
-      existingInventoryPath: /custom/inventory.yaml
-    asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].env
-          content:
-            name: INVENTORY_PATH
-            value: "/custom/inventory.yaml"
-
-  - it: should mount inventory configmap by default
+  - it: should mount inventory configmap
     asserts:
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
@@ -101,17 +91,6 @@ tests:
             name: inventory
             configMap:
               name: av-scanner-inventory
-
-  - it: should not mount inventory configmap when existingInventoryPath is set
-    set:
-      existingInventoryPath: /custom/inventory.yaml
-    asserts:
-      - notContains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
-          content:
-            name: inventory
-            mountPath: /etc/ansible
-            readOnly: true
 
   - it: should mount ssh key secret
     asserts:
@@ -134,28 +113,6 @@ tests:
             secret:
               secretName: my-ssh-secret
               defaultMode: 256
-
-  - it: should include extra volumes and mounts
-    set:
-      extraVolumes:
-        - name: custom-vol
-          configMap:
-            name: my-config
-      extraVolumeMounts:
-        - name: custom-vol
-          mountPath: /custom
-    asserts:
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.volumes
-          content:
-            name: custom-vol
-            configMap:
-              name: my-config
-      - contains:
-          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
-          content:
-            name: custom-vol
-            mountPath: /custom
 
   - it: should use deployer service account
     asserts:

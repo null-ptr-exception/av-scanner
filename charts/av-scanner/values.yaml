@@ -7,10 +7,10 @@ cronjob:
   schedule: "0 */12 * * *"
 
 controller:
-  enabled: false
+  enabled: true
 
 token:
-  duration: 24h
+  duration: 168h
   serviceAccount: av-scanner
 
 # SSH private key for connecting to VMs (required).
@@ -31,10 +31,6 @@ inventory: |
         ansible_host: 192.168.64.3
         ansible_user: ubuntu
 
-# Point to a custom inventory file mounted via extraVolumes.
-# When set, overrides the inventory value above.
-existingInventoryPath: ""
-
 # Pre-install hook that validates SSH connectivity to all inventory hosts
 # by running "ansible all -m ping" before deploying workloads.
 preInstallCheck:
@@ -43,8 +39,10 @@ preInstallCheck:
   activeDeadlineSeconds: 180
   ttlSecondsAfterFinished: 3600
 
-extraVolumes: []
-extraVolumeMounts: []
+# Post-install/upgrade hooks that automatically deploy to VMs.
+# Post-install: mints token + full deploy. Post-upgrade: deploy only (no new token).
+autoDeploy:
+  enabled: true
 
 istio:
   enabled: false

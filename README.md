@@ -84,30 +84,56 @@ make deploy
 
 ### Production (Helm chart)
 
-In production, a **K8s CronJob** runs every 12 hours to deploy av-scanner to VMs (rolling, one at a time) and refresh SA tokens:
+The Helm chart provides two deployment mechanisms:
+
+1. **Controller pod** — an always-on pod for initial deployment and ad-hoc operations.
+2. **CronJob** — runs every 12h to refresh SA tokens on VMs (mint + copy + rolling restart).
 
 ```mermaid
 flowchart LR
-    CronJob["CronJob Pod"] -->|1. kubectl create token| K8sAPI["K8s API"]
-    CronJob -->|2. ansible-playbook over SSH| VMs["Target VMs (serial)"]
-    VMs -->|3. auth requests with SA token| KFA["kube-federated-auth"]
+    subgraph "Initial deploy (controller pod)"
+        Controller["kubectl exec"] -->|ansible-playbook deploy.yaml| VMs1["Target VMs"]
+    end
+    subgraph "Token refresh (CronJob, every 12h)"
+        CronJob["CronJob Pod"] -->|ansible-playbook token-refresh.yaml| VMs2["Target VMs"]
+    end
+    VMs1 & VMs2 -->|auth requests| KFA["kube-federated-auth"]
 ```
 
-The deployer image (`docker/Dockerfile`) bundles the Go binary, Ansible, and kubectl. The entrypoint (`docker/entrypoint.sh`):
-1. Mints a fresh SA token via `kubectl create token` (default: 24h expiry)
-2. Runs the Ansible playbook to deploy the binary and token to VMs (one at a time)
+The `token-refresh.yaml` playbook mints a fresh SA token and distributes it to all VMs. The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (default: 168h) to ensure tokens are refreshed before expiry.
 
-The CronJob schedule (every 12h) must be shorter than `TOKEN_DURATION` (24h) to ensure the token is refreshed before it expires.
-
-To deploy:
+#### Install
 
 ```bash
-# Build the deployer image
-make build-deploy
+# Create SSH key secret
+kubectl create ns av-scanner
+kubectl -n av-scanner create secret generic my-ssh-key --from-file=id_ed25519=<path>
 
-# Install the Helm chart
-helm install av-scanner charts/av-scanner -n av-scanner --create-namespace
+# Install chart
+helm install av-scanner oci://ghcr.io/null-ptr-exception/av-scanner/charts/av-scanner \
+    -n av-scanner \
+    --set sshKey.existingSecret=my-ssh-key
 ```
+
+#### Initial deploy via controller pod
+
+```bash
+# Exec into the controller pod
+kubectl -n av-scanner exec -it deploy/av-scanner-controller -- bash
+
+# Run the full deploy playbook (installs ClamAV, binary, token)
+ansible-playbook playbooks/deploy.yaml
+```
+
+#### Available playbooks
+
+| Playbook | Description |
+|----------|-------------|
+| `playbooks/deploy.yaml` | Full deploy: ClamAV + av-scanner binary + config |
+| `playbooks/token-refresh.yaml` | Mint token + copy to VMs + rolling restart |
+| `playbooks/restart.yaml` | Restart av-scanner service on all VMs |
+
+On `helm install`, the chart automatically runs `token-refresh.yaml` then `deploy.yaml` via a post-install hook. On `helm upgrade`, only `deploy.yaml` runs (existing tokens are preserved).
 
 See `charts/av-scanner/values.yaml` for all configurable values.
 
@@ -178,14 +204,13 @@ make vm-destroy
 
 ### Deployer CronJob Configuration
 
-These env vars are set on the deployer CronJob container (see `charts/av-scanner/values.yaml`):
+These env vars are read by the playbooks via `lookup('env', ...)`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
 | `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
-| `TOKEN_DURATION` | 24h | Token expiry (must be longer than CronJob schedule) |
-| `INVENTORY_PATH` | inventory.yaml | Path to Ansible inventory file |
+| `TOKEN_DURATION` | 168h | Token expiry (must be longer than CronJob schedule) |
 
 ## Authentication
 

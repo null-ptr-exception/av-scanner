@@ -1,40 +1,41 @@
-{{- if .Values.preInstallCheck.enabled }}
+{{- if .Values.autoDeploy.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "av-scanner.fullname" . }}-validate-ssh
+  name: {{ include "av-scanner.fullname" . }}-upgrade
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "av-scanner.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: pre-install
+    helm.sh/hook: post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
-  backoffLimit: {{ .Values.preInstallCheck.backoffLimit }}
-  activeDeadlineSeconds: {{ .Values.preInstallCheck.activeDeadlineSeconds }}
-  ttlSecondsAfterFinished: {{ .Values.preInstallCheck.ttlSecondsAfterFinished }}
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
+      serviceAccountName: {{ include "av-scanner.fullname" . }}-deployer
       restartPolicy: Never
       containers:
-        - name: validate-ssh
+        - name: deploy
           image: {{ include "av-scanner.image" . }}
           command:
-            - sh
-            - -c
-            - |
-              echo "$INVENTORY" > /tmp/hosts
-              ansible all -m ping -i /tmp/hosts
-          env:
-            - name: INVENTORY
-              value: {{ .Values.inventory | quote }}
+            - ansible-playbook
+            - playbooks/deploy.yaml
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
+              readOnly: true
+            - name: inventory
+              mountPath: /etc/ansible
               readOnly: true
       volumes:
         - name: ssh-key
           secret:
             secretName: {{ include "av-scanner.sshSecretName" . }}
             defaultMode: 0400
+        - name: inventory
+          configMap:
+            name: {{ include "av-scanner.fullname" . }}-inventory
 {{- end }}

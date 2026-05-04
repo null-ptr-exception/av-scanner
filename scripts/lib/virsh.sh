@@ -88,12 +88,12 @@ virsh_create_vm() {
     local disk="${disk_dir}/${vm_name}.qcow2"
 
     if _virsh dominfo "$vm_name" &>/dev/null; then
-        _virsh destroy "$vm_name" 2>/dev/null || true
-        _virsh undefine "$vm_name" --remove-all-storage 2>/dev/null || true
+        _virsh destroy "$vm_name" || true
+        _virsh undefine "$vm_name" --remove-all-storage
     fi
 
     rm -f "$disk"
-    qemu-img create -f qcow2 -b "$base_image" -F qcow2 "$disk" "${disk_size}G" >/dev/null
+    qemu-img create -f qcow2 -b "$base_image" -F qcow2 "$disk" "${disk_size}G"
 
     virt-install \
         --connect "$VIRSH_CONNECT" \
@@ -107,8 +107,7 @@ virsh_create_vm() {
         --graphics none \
         --console pty,target_type=serial \
         --noautoconsole \
-        --import \
-        >/dev/null 2>&1
+        --import
 }
 
 # Wait for a VM to get an IP address.
@@ -120,7 +119,7 @@ virsh_wait_ip() {
 
     while [[ $elapsed -lt $timeout ]]; do
         local ip
-        ip=$(_virsh domifaddr "$vm_name" 2>/dev/null \
+        ip=$(_virsh domifaddr "$vm_name" \
             | grep -oP '(\d+\.){3}\d+' | head -1)
         if [[ -n "$ip" ]]; then
             echo "$ip"
@@ -143,7 +142,7 @@ virsh_wait_ssh() {
     while [[ $elapsed -lt $timeout ]]; do
         if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 -o BatchMode=yes \
-            -i "$ssh_key" "ubuntu@${ip}" "echo ok" &>/dev/null; then
+            -i "$ssh_key" "ubuntu@${ip}" "echo ok" >/dev/null; then
             return 0
         fi
         sleep 5
@@ -157,28 +156,28 @@ virsh_wait_ssh() {
 virsh_destroy_vm() {
     local vm_name="$1"
     if _virsh dominfo "$vm_name" &>/dev/null; then
-        _virsh destroy "$vm_name" 2>/dev/null || true
-        _virsh undefine "$vm_name" --remove-all-storage 2>/dev/null || true
+        _virsh destroy "$vm_name" || true
+        _virsh undefine "$vm_name" --remove-all-storage
     fi
 }
 
 # Get the IP of a running VM.
 virsh_get_ip() {
     local vm_name="$1"
-    _virsh domifaddr "$vm_name" 2>/dev/null \
+    _virsh domifaddr "$vm_name" \
         | grep -oP '(\d+\.){3}\d+' | head -1
 }
 
 # List VM names matching a prefix (any state).
 virsh_list_by_prefix() {
     local prefix="$1"
-    _virsh list --all --name 2>/dev/null | grep "^${prefix}" | sort
+    _virsh list --all --name | grep "^${prefix}" | sort
 }
 
 # Check if a VM is running.
 virsh_is_running() {
     local vm_name="$1"
     local state
-    state=$(_virsh domstate "$vm_name" 2>/dev/null)
+    state=$(_virsh domstate "$vm_name")
     [[ "$state" == "running" ]]
 }

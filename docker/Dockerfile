@@ -52,8 +52,5 @@ RUN cp /usr/local/bin/node_exporter /app/node_exporter
 COPY ansible/ansible.cfg /app/ansible/
 COPY ansible/playbooks/ /app/ansible/playbooks/
 COPY ansible/roles/ /app/ansible/roles/
-COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
 
 WORKDIR /app/ansible
-ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,28 +1,31 @@
-{{- if .Values.controller.enabled }}
-apiVersion: apps/v1
-kind: Deployment
+{{- if .Values.autoDeploy.enabled }}
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: {{ include "av-scanner.fullname" . }}-controller
+  name: {{ include "av-scanner.fullname" . }}-deploy
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "av-scanner.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: av-scanner-controller
-      app.kubernetes.io/instance: {{ .Release.Name }}
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
   template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: av-scanner-controller
-        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       serviceAccountName: {{ include "av-scanner.fullname" . }}-deployer
+      restartPolicy: Never
       containers:
-        - name: controller
+        - name: deploy
           image: {{ include "av-scanner.image" . }}
-          command: ["sleep", "infinity"]
+          command:
+            - sh
+            - -ec
+            - |
+              ansible-playbook playbooks/token-refresh.yaml
+              ansible-playbook playbooks/deploy.yaml
           env:
             - name: SA_NAME
               value: {{ .Values.token.serviceAccount | quote }}

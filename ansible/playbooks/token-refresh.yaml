@@ -1,0 +1,51 @@
+---
+- name: Mint SA token
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Create SA token
+      command: >
+        kubectl create token {{ lookup('env', 'SA_NAME') | default('av-scanner', true) }}
+          --namespace {{ lookup('env', 'SA_NAMESPACE') | default('av-scanner', true) }}
+          --duration {{ lookup('env', 'TOKEN_DURATION') | default('168h', true) }}
+      register: token_result
+      changed_when: false
+
+    - name: Write token to file
+      copy:
+        content: "{{ token_result.stdout }}"
+        dest: /tmp/sa-token
+        mode: "0600"
+
+- name: Refresh SA token on VMs
+  hosts: all
+  serial: 1
+  become: true
+  gather_facts: false
+  vars:
+    k8s_auth_token_path: /etc/av-scanner/sa-token
+  tasks:
+    - name: Copy SA token to VM
+      copy:
+        src: /tmp/sa-token
+        dest: "{{ k8s_auth_token_path }}"
+        mode: "0600"
+      notify: Restart av-scanner
+
+  handlers:
+    - name: Restart av-scanner
+      systemd:
+        name: av-scanner
+        state: restarted
+
+  post_tasks:
+    - name: Wait for service to be ready
+      uri:
+        url: "http://localhost:3000/api/v1/live"
+        method: GET
+        status_code: [200]
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 2

@@ -4,5 +4,6 @@ venv/
 README.md
 Makefile
 test/
+.vms/
 .e2e-vms/
 .ssh/
