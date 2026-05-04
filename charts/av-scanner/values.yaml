@@ -1,7 +1,7 @@
 image:
   registry: ghcr.io
   repository: null-ptr-exception/av-scanner
-  tag: 20260503-r1
+  tag: 20260504-r1
 
 cronjob:
   schedule: "0 */12 * * *"
