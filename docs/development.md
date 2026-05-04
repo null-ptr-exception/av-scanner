@@ -62,7 +62,7 @@ helm package charts/av-scanner
 
 ## Project structure
 
-```
+```text
 ├── main.go                      # Go entrypoint
 ├── internal/                    # Go packages (server, scanner, auth)
 ├── ansible/
