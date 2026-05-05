@@ -36,17 +36,21 @@
     content: |
       [Unit]
       Description=AV Scanner Service
-      After=network.target clamav-daemon.service clamav-clamonacc.service
+      After=network.target{% if av_engine == "clamav" %} clamav-daemon.service clamav-clamonacc.service{% endif %}
 
       [Service]
       Type=simple
       User=root
-      Environment=PORT=3000
+      Environment=PORT={{ port }}
       Environment=AV_ENGINE={{ av_engine }}
-      Environment=UPLOAD_DIR=/tmp/av-scanner
-      Environment=CLAMAV_RTS_LOG_PATH=/var/log/clamav/clamonacc.log
-      Environment=TM_RTS_LOG_PATH=/var/log/ds_agent/ds_agent.log
-      Environment=LOG_LEVEL=info
+      Environment=UPLOAD_DIR={{ scan_dir }}
+      {% if av_engine == "clamav" %}
+      Environment=CLAMAV_RTS_LOG_PATH={{ clamav_rts_log_path }}
+      {% endif %}
+      {% if av_engine == "trendmicro" %}
+      Environment=TM_RTS_LOG_PATH={{ tm_rts_log_path }}
+      {% endif %}
+      Environment=LOG_LEVEL={{ log_level }}
       Environment=AUTH_ENABLED={{ auth_enabled | default(false) | string | lower }}
       Environment=K8S_API_ENDPOINT={{ k8s_api_endpoint | default('') }}
       Environment=AUTH_ALLOWLIST_FILE={{ auth_allowlist_file | default('/etc/av-scanner/allowlist.yaml') }}
@@ -72,7 +76,7 @@
 
 - name: Wait for service to be ready
   uri:
-    url: "http://localhost:3000/api/v1/live"
+    url: "http://localhost:{{ port }}/api/v1/live"
     method: GET
     status_code: [200]
   register: health_check
@@ -82,4 +86,4 @@
 
 - name: Display service status
   debug:
-    msg: "AV Scanner is running at http://{{ ansible_host }}:3000"
+    msg: "AV Scanner is running at http://{{ ansible_host }}:{{ port }}"

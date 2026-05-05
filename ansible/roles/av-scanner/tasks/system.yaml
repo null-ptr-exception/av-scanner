@@ -29,3 +29,4 @@
     mode: "0700"
     owner: root
     group: root
+  when: av_engine == "clamav"

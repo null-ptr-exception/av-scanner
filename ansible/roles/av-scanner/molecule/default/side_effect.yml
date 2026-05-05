@@ -7,7 +7,7 @@
   tasks:
     - name: Health check
       uri:
-        url: "http://localhost:3000/api/v1/live"
+        url: "http://localhost:{{ port | default(3000) }}/api/v1/live"
         method: GET
         status_code: [200]
       register: live_check

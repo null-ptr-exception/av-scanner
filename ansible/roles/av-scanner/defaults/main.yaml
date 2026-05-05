@@ -2,6 +2,10 @@ av_engine: clamav
 binary_path: /app/av-scanner
 node_exporter_path: /app/node_exporter
 scan_dir: /tmp/av-scanner
+port: 3000
+log_level: info
+clamav_rts_log_path: /var/log/clamav/clamonacc.log
+tm_rts_log_path: /var/log/ds_agent/ds_agent.log
 k8s_auth_token_path: /etc/av-scanner/sa-token
 node_exporter_version: "1.9.0"
 node_exporter_port: 9100
