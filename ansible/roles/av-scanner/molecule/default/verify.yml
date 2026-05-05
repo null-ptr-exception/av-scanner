@@ -20,7 +20,7 @@
 
     - name: av-scanner health check responds
       uri:
-        url: "http://localhost:3000/api/v1/live"
+        url: "http://localhost:{{ port | default(3000) }}/api/v1/live"
         method: GET
         status_code: [200]
       register: health
@@ -54,8 +54,47 @@
         method: GET
         status_code: [200]
 
-    - name: Quarantine directory exists
+    - name: Quarantine directory exists (clamav only)
       stat:
         path: /tmp/av-scanner/quarantine
       register: quarantine
       failed_when: not quarantine.stat.exists
+      when: av_engine == "clamav"
+
+    - name: Quarantine directory does not exist (trendmicro)
+      stat:
+        path: /tmp/av-scanner/quarantine
+      register: quarantine_tm
+      failed_when: quarantine_tm.stat.exists
+      when: av_engine == "trendmicro"
+
+    - name: Systemd unit contains CLAMAV_RTS_LOG_PATH (clamav only)
+      command: grep -q CLAMAV_RTS_LOG_PATH /etc/systemd/system/av-scanner.service
+      changed_when: false
+      when: av_engine == "clamav"
+
+    - name: Systemd unit does not contain CLAMAV_RTS_LOG_PATH (trendmicro)
+      command: grep -q CLAMAV_RTS_LOG_PATH /etc/systemd/system/av-scanner.service
+      register: grep_clamav
+      changed_when: false
+      failed_when: grep_clamav.rc == 0
+      when: av_engine == "trendmicro"
+
+    - name: Systemd unit contains TM_RTS_LOG_PATH (trendmicro only)
+      command: grep -q TM_RTS_LOG_PATH /etc/systemd/system/av-scanner.service
+      changed_when: false
+      when: av_engine == "trendmicro"
+
+    - name: Systemd unit does not contain TM_RTS_LOG_PATH (clamav)
+      command: grep -q TM_RTS_LOG_PATH /etc/systemd/system/av-scanner.service
+      register: grep_tm
+      changed_when: false
+      failed_when: grep_tm.rc == 0
+      when: av_engine == "clamav"
+
+    - name: Systemd unit does not reference clamav services (trendmicro)
+      command: grep -q clamav-daemon /etc/systemd/system/av-scanner.service
+      register: grep_after
+      changed_when: false
+      failed_when: grep_after.rc == 0
+      when: av_engine == "trendmicro"

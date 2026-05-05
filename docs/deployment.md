@@ -151,6 +151,16 @@ inventory: |
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `av_engine` | clamav | Active engine (`clamav` / `trendmicro`) |
+| `port` | 3000 | HTTP server port |
+| `scan_dir` | /tmp/av-scanner | Upload/scan directory |
+| `log_level` | info | Log level |
+
+#### Engine-specific
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `clamav_rts_log_path` | /var/log/clamav/clamonacc.log | ClamAV real-time scan log |
+| `tm_rts_log_path` | /var/log/ds_agent/ds_agent.log | TrendMicro DS Agent log |
 
 #### Authentication
 
