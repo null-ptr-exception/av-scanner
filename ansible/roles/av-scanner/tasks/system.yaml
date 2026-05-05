@@ -12,7 +12,6 @@
 - name: Install common dependencies
   apt:
     name:
-      - moreutils
       - python3
       - python3-apt
     state: present
@@ -22,14 +21,6 @@
     path: "{{ scan_dir }}"
     state: directory
     mode: "0777"
-
-- name: Mount tmpfs for scan directory (enables fanotify)
-  mount:
-    path: "{{ scan_dir }}"
-    src: tmpfs
-    fstype: tmpfs
-    opts: size=512M,mode=0777
-    state: mounted
 
 - name: Create quarantine directory
   file:

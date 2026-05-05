@@ -54,10 +54,6 @@
         method: GET
         status_code: [200]
 
-    - name: Scan directory is mounted as tmpfs
-      command: findmnt -t tmpfs /tmp/av-scanner
-      changed_when: false
-
     - name: Quarantine directory exists
       stat:
         path: /tmp/av-scanner/quarantine
