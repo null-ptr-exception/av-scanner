@@ -1,0 +1,70 @@
+suite: Name overrides
+templates:
+  - configmap.yaml
+  - controller.yaml
+  - cronjob.yaml
+  - rbac.yaml
+release:
+  name: my-release
+  namespace: av-scanner
+set:
+  sshKey.existingSecret: test-ssh-key
+tests:
+  - it: should use release-chartname by default
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-release-av-scanner-inventory
+        template: configmap.yaml
+      - equal:
+          path: metadata.name
+          value: my-release-av-scanner-controller
+        template: controller.yaml
+
+  - it: should respect fullnameOverride
+    set:
+      fullnameOverride: custom-name
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-name-inventory
+        template: configmap.yaml
+      - equal:
+          path: metadata.name
+          value: custom-name-controller
+        template: controller.yaml
+      - equal:
+          path: metadata.name
+          value: custom-name-deploy
+        template: cronjob.yaml
+      - equal:
+          path: metadata.name
+          value: custom-name-deployer
+        template: rbac.yaml
+        documentIndex: 0
+
+  - it: should respect nameOverride
+    set:
+      nameOverride: short
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-release-short-inventory
+        template: configmap.yaml
+      - equal:
+          path: metadata.name
+          value: my-release-short-controller
+        template: controller.yaml
+
+  - it: should deduplicate when release name contains chart name
+    release:
+      name: av-scanner
+    asserts:
+      - equal:
+          path: metadata.name
+          value: av-scanner-inventory
+        template: configmap.yaml
+      - equal:
+          path: metadata.name
+          value: av-scanner-controller
+        template: controller.yaml

@@ -1,3 +1,6 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   registry: ghcr.io
   repository: null-ptr-exception/av-scanner
