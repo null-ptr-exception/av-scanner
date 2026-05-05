@@ -1,18 +1,2 @@
 ---
-- name: Converge
-  hosts: all
-  serial: 1
-  become: true
-  gather_facts: true
-  vars:
-    binary_path: "{{ lookup('env', 'MOLECULE_AV_SCANNER_BINARY') }}"
-    node_exporter_path: "{{ lookup('env', 'MOLECULE_NODE_EXPORTER_BINARY') }}"
-    av_engine: "{{ lookup('env', 'MOLECULE_AV_ENGINE') | default('clamav', true) }}"
-    auth_enabled: "{{ lookup('env', 'MOLECULE_AUTH_ENABLED') | default(false, true) }}"
-    k8s_api_endpoint: "{{ lookup('env', 'MOLECULE_K8S_API_ENDPOINT') | default('', true) }}"
-    auth_allowlist_content: "{{ lookup('file', lookup('env', 'MOLECULE_AUTH_ALLOWLIST_FILE')) if lookup('env', 'MOLECULE_AUTH_ALLOWLIST_FILE') else '' }}"
-    token_file: "{{ lookup('env', 'MOLECULE_TOKEN_FILE') | default('', true) }}"
-  roles:
-    - role: clamav
-      when: av_engine == "clamav"
-    - av-scanner
+- import_playbook: ../../../../playbooks/deploy.yaml
