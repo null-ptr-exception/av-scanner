@@ -60,6 +60,13 @@ users:
     ssh_authorized_keys:
       - ${ssh_pub_key}
 ssh_pwauth: false
+apt:
+  primary:
+    - arches: [default]
+      uri: http://ftp.tw.debian.org/ubuntu
+  security:
+    - arches: [default]
+      uri: http://ftp.tw.debian.org/ubuntu
 packages:
   - python3
   - python3-apt
@@ -89,7 +96,7 @@ virsh_create_vm() {
 
     if _virsh dominfo "$vm_name" &>/dev/null; then
         _virsh destroy "$vm_name" || true
-        _virsh undefine "$vm_name" --remove-all-storage
+        _virsh undefine "$vm_name" --remove-all-storage --snapshots-metadata
     fi
 
     rm -f "$disk"
@@ -157,7 +164,7 @@ virsh_destroy_vm() {
     local vm_name="$1"
     if _virsh dominfo "$vm_name" &>/dev/null; then
         _virsh destroy "$vm_name" || true
-        _virsh undefine "$vm_name" --remove-all-storage
+        _virsh undefine "$vm_name" --remove-all-storage --snapshots-metadata
     fi
 }
 

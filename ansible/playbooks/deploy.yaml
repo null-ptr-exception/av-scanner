@@ -40,7 +40,7 @@
 
 - name: Deploy AV Scanner to VM
   hosts: all
-  serial: 1
+  serial: "{{ deploy_serial | default('100%') }}"
   become: true
   gather_facts: true
   vars:

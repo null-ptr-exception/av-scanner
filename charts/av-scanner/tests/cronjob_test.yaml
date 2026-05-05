@@ -31,11 +31,11 @@ tests:
 
   - it: should default image tag to appVersion
     chart:
-      appVersion: 20260504-r1
+      appVersion: 20260505-r1
     asserts:
       - equal:
           path: spec.jobTemplate.spec.template.spec.containers[0].image
-          value: ghcr.io/null-ptr-exception/av-scanner:20260504-r1
+          value: ghcr.io/null-ptr-exception/av-scanner:20260505-r1
 
   - it: should use custom image registry
     set:

@@ -17,19 +17,32 @@ setup_file() {
     local project_root
     project_root="$(get_project_root)"
 
-    e2e_vm_setup
+    _e2e_init
+    local ssh_key="${project_root}/.vms/id_ed25519"
+
+    # --- Revert VMs to clean-base snapshot (truly clean state) ---
+    for name in e2e-1 e2e-2; do
+        echo "# Reverting $name to clean-base snapshot..."
+        virsh_snapshot_revert "$name" "clean-base"
+    done
+
+    # --- Wait for VMs after revert ---
+    for name in e2e-1 e2e-2; do
+        local vm_ip
+        vm_ip=$(virsh_wait_ip "$name")
+        echo "# Waiting for SSH on $name ($vm_ip)..."
+        virsh_wait_ssh "$vm_ip" "$ssh_key"
+    done
+
+    # --- Re-discover VM IPs ---
+    export E2E_VM1_IP=$(virsh_get_ip "e2e-1")
+    export E2E_VM2_IP=$(virsh_get_ip "e2e-2")
+    export E2E_SSH_KEY="$ssh_key"
+    echo "# VMs reverted: e2e-1=${E2E_VM1_IP}, e2e-2=${E2E_VM2_IP}"
 
     export KIND_CLUSTER="av-scanner-e2e"
     export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
     kind export kubeconfig --name "$KIND_CLUSTER"
-
-    # --- Clean av-scanner from VMs (ensure hooks are the sole deployer) ---
-    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
-    for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
-        echo "# Cleaning av-scanner from ${vm_ip}..."
-        ssh $ssh_opts -i "$E2E_SSH_KEY" "ubuntu@${vm_ip}" \
-            "sudo systemctl stop av-scanner || true; sudo rm -f /usr/local/bin/av-scanner" || true
-    done
 
     # --- Clean Helm state ---
     helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner || true

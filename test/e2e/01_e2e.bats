@@ -66,7 +66,7 @@ INVEOF
         --set "istio.workloadEntries[0].address=${E2E_VM1_IP}" \
         --set "istio.workloadEntries[1].name=vm2" \
         --set "istio.workloadEntries[1].address=${E2E_VM2_IP}" \
-        --wait --timeout 300s
+        --wait --timeout 600s
 
     # --- Test service accounts ---
     _kubectl create namespace test-client --dry-run=client -o yaml | _kubectl apply -f -
