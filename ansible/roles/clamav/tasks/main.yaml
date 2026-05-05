@@ -7,7 +7,7 @@
     state: present
 
 - name: Check if ClamAV databases exist
-  shell: ls /var/lib/clamav/main.{cvd,cld} /var/lib/clamav/daily.{cvd,cld} 2>/dev/null | wc -l
+  shell: ls /var/lib/clamav/main.cvd /var/lib/clamav/main.cld /var/lib/clamav/daily.cvd /var/lib/clamav/daily.cld 2>/dev/null | wc -l
   register: clamav_db_count
   changed_when: false
 
