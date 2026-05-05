@@ -48,6 +48,15 @@ preInstallCheck:
 autoDeploy:
   enabled: true
 
+podAnnotations:
+  sidecar.istio.io/inject: "false"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
 resources: {}
   # limits:
   #   cpu: 500m

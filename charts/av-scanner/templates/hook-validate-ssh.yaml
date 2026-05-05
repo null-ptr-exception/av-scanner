@@ -14,6 +14,14 @@ spec:
   activeDeadlineSeconds: {{ .Values.preInstallCheck.activeDeadlineSeconds }}
   ttlSecondsAfterFinished: {{ .Values.preInstallCheck.ttlSecondsAfterFinished }}
   template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        app.kubernetes.io/name: av-scanner-validate-ssh
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       restartPolicy: Never
       containers:
@@ -36,6 +44,18 @@ spec:
             - name: ssh-key
               mountPath: /ssh
               readOnly: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: ssh-key
           secret:
