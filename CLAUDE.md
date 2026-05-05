@@ -78,6 +78,13 @@ VMs are managed via **libvirt/virsh** (`qemu:///system`). VMs get real IPs on th
 
 **Prerequisites:** `virsh`, `virt-install`, `qemu-img`, `cloud-localds`
 
+## Releasing
+
+See `docs/development.md` § Releasing for full steps. Key points:
+- Bump `Chart.yaml` version + appVersion before merging
+- After merge: `git tag <appVersion> && git push origin <appVersion>`
+- appVersion format: `YYYYMMDD-rN` (e.g. `20260505-r3`)
+
 ## Shell Scripts Policy
 
 **NEVER suppress stderr** in scripts or tests (`2>/dev/null`, `>/dev/null 2>&1`, `&>/dev/null`).
