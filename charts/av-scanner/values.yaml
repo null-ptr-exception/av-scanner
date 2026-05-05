@@ -52,10 +52,12 @@ istio:
   enabled: false
   # <namespace>/<name> of the Istio Gateway resource
   gatewayRef: ""
+  # Namespace where the gateway pods run (for exportTo)
+  gatewayNamespace: istio-system
   port: 3000
-  serviceHost: av-scanner.corp.localhost
-  workloadEntries: []
-  # - name: vm1
-  #   address: 192.168.64.2
-  # - name: vm2
-  #   address: 192.168.64.3
+  # Internal hostname used as routing identifier (does not need real DNS)
+  serviceHost: av-scanner.internal
+  # VM endpoints
+  endpoints: []
+  # - address: 192.168.64.2
+  # - address: 192.168.64.3

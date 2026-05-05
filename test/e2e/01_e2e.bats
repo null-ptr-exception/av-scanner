@@ -62,10 +62,8 @@ INVEOF
         --set-string "inventory=${inventory}" \
         --set istio.enabled=true \
         --set istio.gatewayRef=istio-system/av-scanner \
-        --set "istio.workloadEntries[0].name=vm1" \
-        --set "istio.workloadEntries[0].address=${E2E_VM1_IP}" \
-        --set "istio.workloadEntries[1].name=vm2" \
-        --set "istio.workloadEntries[1].address=${E2E_VM2_IP}" \
+        --set "istio.endpoints[0].address=${E2E_VM1_IP}" \
+        --set "istio.endpoints[1].address=${E2E_VM2_IP}" \
         --wait --timeout 600s
 
     # --- Test service accounts ---

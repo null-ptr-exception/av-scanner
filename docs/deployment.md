@@ -93,18 +93,17 @@ The CronJob schedule must be shorter than `token.duration` (default: 168h) to en
 
 ## Load balancing with Istio
 
-The Helm chart can optionally create Istio resources (ServiceEntry, WorkloadEntry, VirtualService, DestinationRule) to load-balance traffic across VMs through an existing Istio ingress gateway.
+The Helm chart can optionally create Istio resources (VirtualService, ServiceEntry, DestinationRule) to load-balance traffic across VMs through an existing Istio ingress gateway.
 
 ```yaml
 istio:
   enabled: true
   gatewayRef: istio-system/av-scanner   # cross-namespace Gateway reference
-  serviceHost: av-scanner.corp.localhost
-  workloadEntries:
-  - name: vm1
-    address: 192.168.122.178
-  - name: vm2
-    address: 192.168.122.45
+  gatewayNamespace: istio-system        # for exportTo scoping
+  serviceHost: av-scanner.internal      # internal routing identifier
+  endpoints:
+  - address: 192.168.122.178
+  - address: 192.168.122.45
 ```
 
 The Gateway resource itself must be deployed separately in the ingress gateway namespace. See [Load Balancing with Istio Gateway](load-balancing-with-istio.md) for the full design, resource placement, and traffic flow.
