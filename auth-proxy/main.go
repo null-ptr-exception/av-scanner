@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultTokenPath  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	defaultTokenPath  = "/var/run/secrets/kubernetes.io/serviceaccount/token" // nosemgrep: hardcoded-password
 	defaultListenAddr = ":8080"
 	tokenRefreshInterval = 30 * time.Second
 )

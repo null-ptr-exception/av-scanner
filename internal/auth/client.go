@@ -13,8 +13,7 @@ import (
 	"time"
 )
 
-// tokenReviewPath is the Kubernetes TokenReview API path
-const tokenReviewPath = "/apis/authentication.k8s.io/v1/tokenreviews"
+const tokenReviewPath = "/apis/authentication.k8s.io/v1/tokenreviews" // nosemgrep: hardcoded-password
 
 // TokenReviewRequest is a Kubernetes TokenReview request
 type TokenReviewRequest struct {
