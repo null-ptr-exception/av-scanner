@@ -141,7 +141,12 @@ main() {
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i "$SSH_KEY" "ubuntu@${vm_ip}" "cloud-init status --wait" || true
 
-        log_success "$name ready"
+        log_info "Creating clean-base snapshot for $name..."
+        virsh_snapshot_create "$name" "clean-base"
+        log_info "Waiting for $name IP after snapshot..."
+        vm_ip=$(virsh_wait_ip "$name")
+
+        log_success "$name ready (snapshot: clean-base)"
     done
 
     # Print summary

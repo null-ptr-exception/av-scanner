@@ -31,7 +31,7 @@ tests:
           path: metadata.annotations["helm.sh/hook-delete-policy"]
           value: before-hook-creation
 
-  - it: should run deploy playbook without minting
+  - it: should run deploy playbook
     asserts:
       - equal:
           path: spec.template.spec.containers[0].command
@@ -39,10 +39,26 @@ tests:
             - ansible-playbook
             - playbooks/deploy.yaml
 
-  - it: should not have token env vars
+  - it: should set token env vars
+    set:
+      token.serviceAccount: custom-sa
+      token.duration: 48h
     asserts:
-      - isNull:
+      - contains:
           path: spec.template.spec.containers[0].env
+          content:
+            name: SA_NAME
+            value: "custom-sa"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TOKEN_DURATION
+            value: "48h"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SA_NAMESPACE
+            value: "av-scanner"
 
   - it: should use deployer service account
     asserts:

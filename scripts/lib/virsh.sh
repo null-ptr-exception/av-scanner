@@ -60,6 +60,13 @@ users:
     ssh_authorized_keys:
       - ${ssh_pub_key}
 ssh_pwauth: false
+apt:
+  primary:
+    - arches: [default]
+      uri: http://ftp.tw.debian.org/ubuntu
+  security:
+    - arches: [default]
+      uri: http://ftp.tw.debian.org/ubuntu
 packages:
   - python3
   - python3-apt
@@ -89,7 +96,7 @@ virsh_create_vm() {
 
     if _virsh dominfo "$vm_name" &>/dev/null; then
         _virsh destroy "$vm_name" || true
-        _virsh undefine "$vm_name" --remove-all-storage
+        _virsh undefine "$vm_name" --remove-all-storage --snapshots-metadata
     fi
 
     rm -f "$disk"
@@ -157,8 +164,47 @@ virsh_destroy_vm() {
     local vm_name="$1"
     if _virsh dominfo "$vm_name" &>/dev/null; then
         _virsh destroy "$vm_name" || true
-        _virsh undefine "$vm_name" --remove-all-storage
+        _virsh undefine "$vm_name" --remove-all-storage --snapshots-metadata
     fi
+}
+
+# Check if a snapshot exists for a VM.
+virsh_snapshot_exists() {
+    local vm_name="$1"
+    local snap_name="${2:-clean-base}"
+    _virsh snapshot-info "$vm_name" "$snap_name" &>/dev/null
+}
+
+# Create a snapshot (VM must be shut off for a disk-only snapshot).
+# Args: <vm_name> [snapshot_name]
+virsh_snapshot_create() {
+    local vm_name="$1"
+    local snap_name="${2:-clean-base}"
+
+    _virsh shutdown "$vm_name" || true
+    local elapsed=0
+    while [[ $elapsed -lt 30 ]]; do
+        local state
+        state=$(_virsh domstate "$vm_name")
+        [[ "$state" == "shut off" ]] && break
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    _virsh destroy "$vm_name" || true
+
+    _virsh snapshot-create-as "$vm_name" "$snap_name"
+    _virsh start "$vm_name"
+}
+
+# Revert a VM to a snapshot and start it.
+# Args: <vm_name> [snapshot_name]
+virsh_snapshot_revert() {
+    local vm_name="$1"
+    local snap_name="${2:-clean-base}"
+
+    _virsh destroy "$vm_name" || true
+    _virsh snapshot-revert "$vm_name" "$snap_name"
+    _virsh start "$vm_name"
 }
 
 # Get the IP of a running VM.

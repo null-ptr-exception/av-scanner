@@ -79,10 +79,10 @@ jobs:
         run: VM_MEMORY=2048 ./scripts/vm-init.sh --name e2e --count 2 --force
 
       - name: Run e2e tests
-        run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/01_e2e.bats
+        run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/
 
       - name: Cleanup
         if: always()
         run: |
           ./scripts/vm-destroy.sh --name e2e --count 2
-          kind delete cluster --name av-scanner-e2e 2>/dev/null || true
+          kind delete cluster --name av-scanner-e2e || true

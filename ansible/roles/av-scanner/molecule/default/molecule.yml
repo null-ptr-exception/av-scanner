@@ -18,6 +18,12 @@ provisioner:
     defaults:
       roles_path: ${MOLECULE_PROJECT_DIRECTORY}/..
   inventory:
+    group_vars:
+      all:
+        av_engine: "{{ lookup('env', 'MOLECULE_AV_ENGINE') | default('clamav', true) }}"
+        auth_enabled: "{{ lookup('env', 'MOLECULE_AUTH_ENABLED') | default(false, true) }}"
+        k8s_api_endpoint: "{{ lookup('env', 'MOLECULE_K8S_API_ENDPOINT') | default('', true) }}"
+        auth_allowlist_content: "{{ lookup('file', lookup('env', 'MOLECULE_AUTH_ALLOWLIST_FILE')) if lookup('env', 'MOLECULE_AUTH_ALLOWLIST_FILE') else '' }}"
     host_vars:
       vm1:
         ansible_host: ${MOLECULE_VM1_IP}

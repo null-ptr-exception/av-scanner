@@ -1,65 +1,16 @@
 ---
-# Rolling restart test: restart one VM at a time, verify the other stays healthy.
-- name: Rolling restart vm1
-  hosts: vm1
-  serial: 1
-  become: true
+- import_playbook: ../../../../playbooks/restart.yaml
+
+- name: Verify both VMs healthy after rolling restart
+  hosts: all
   gather_facts: false
   tasks:
-    - name: Restart av-scanner on vm1
-      systemd:
-        name: av-scanner
-        state: restarted
-        daemon_reload: true
-
-    - name: Wait for vm1 to be ready
+    - name: Health check
       uri:
         url: "http://localhost:3000/api/v1/live"
         method: GET
         status_code: [200]
-      register: health
-      until: health.status == 200
-      retries: 30
-      delay: 2
-
-- name: Verify vm2 stayed healthy during vm1 restart
-  hosts: vm2
-  gather_facts: false
-  tasks:
-    - name: vm2 health check
-      uri:
-        url: "http://localhost:3000/api/v1/live"
-        method: GET
-        status_code: [200]
-
-- name: Rolling restart vm2
-  hosts: vm2
-  serial: 1
-  become: true
-  gather_facts: false
-  tasks:
-    - name: Restart av-scanner on vm2
-      systemd:
-        name: av-scanner
-        state: restarted
-        daemon_reload: true
-
-    - name: Wait for vm2 to be ready
-      uri:
-        url: "http://localhost:3000/api/v1/live"
-        method: GET
-        status_code: [200]
-      register: health
-      until: health.status == 200
-      retries: 30
-      delay: 2
-
-- name: Verify vm1 stayed healthy during vm2 restart
-  hosts: vm1
-  gather_facts: false
-  tasks:
-    - name: vm1 health check
-      uri:
-        url: "http://localhost:3000/api/v1/live"
-        method: GET
-        status_code: [200]
+      register: live_check
+      until: live_check.status == 200
+      retries: 10
+      delay: 3

@@ -31,11 +31,13 @@ tests:
           path: metadata.annotations["helm.sh/hook-delete-policy"]
           value: before-hook-creation
 
-  - it: should run token-refresh then deploy
+  - it: should run deploy playbook
     asserts:
-      - matchRegex:
-          path: spec.template.spec.containers[0].command[2]
-          pattern: "token-refresh\\.yaml[\\s\\S]*deploy\\.yaml"
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - ansible-playbook
+            - playbooks/deploy.yaml
 
   - it: should set token env vars
     set:

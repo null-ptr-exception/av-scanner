@@ -1,9 +1,43 @@
 ---
+- name: Check token state on targets
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check if SA token exists
+      stat:
+        path: "{{ k8s_auth_token_path | default('/etc/av-scanner/sa-token') }}"
+      register: token_stat
+
+- name: Mint SA token if needed
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sa_name: "{{ lookup('env', 'SA_NAME') | default('av-scanner', true) }}"
+    sa_namespace: "{{ lookup('env', 'SA_NAMESPACE') | default('av-scanner', true) }}"
+    token_duration: "{{ lookup('env', 'TOKEN_DURATION') | default('168h', true) }}"
+  tasks:
+    - name: Determine if any target needs a token
+      set_fact:
+        any_missing_token: "{{ groups['all'] | map('extract', hostvars, 'token_stat') | selectattr('stat.exists', 'false') | list | length > 0 }}"
+
+    - name: Mint SA token to file
+      shell: >
+        kubectl create token {{ sa_name }}
+          --namespace {{ sa_namespace }}
+          --duration {{ token_duration }}
+          > /tmp/sa-token &&
+        chmod 0600 /tmp/sa-token
+      when: any_missing_token
+
 - name: Deploy AV Scanner to VM
   hosts: all
-  serial: 1
+  serial: "{{ deploy_serial | default('100%') }}"
   become: true
   gather_facts: true
+  vars:
+    token_file: "{{ '/tmp/sa-token' if not token_stat.stat.exists else '' }}"
   roles:
     - role: clamav
       when: av_engine | default('clamav') == "clamav"
