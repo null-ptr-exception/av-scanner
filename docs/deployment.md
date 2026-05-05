@@ -11,7 +11,7 @@ av-scanner runs as a systemd service on Ubuntu VMs. The Helm chart provides thre
 ```mermaid
 flowchart LR
     subgraph "helm install (automated)"
-        Hook["Post-install Job"] -->|token-refresh.yaml + deploy.yaml| VMs1["Target VMs"]
+        Hook["Post-install Job"] -->|deploy.yaml| VMs1["Target VMs"]
     end
     subgraph "helm upgrade (automated)"
         UpHook["Post-upgrade Job"] -->|deploy.yaml| VMs2["Target VMs"]
@@ -83,13 +83,13 @@ ansible-playbook playbooks/restart.yaml
 | `playbooks/token-refresh.yaml` | Mint SA token + copy to VMs + rolling restart |
 | `playbooks/restart.yaml` | Rolling restart of av-scanner service |
 
-All playbooks run with `serial: 1` (one VM at a time) and wait for the health check to pass before proceeding to the next VM, ensuring zero-downtime when a load balancer is in front.
+`restart.yaml` and `token-refresh.yaml` run with `serial: 1` (one VM at a time) and wait for the health check to pass before proceeding, ensuring zero-downtime when a load balancer is in front. `deploy.yaml` runs on all hosts in parallel by default (override with `deploy_serial` variable).
 
 ## CronJob
 
 The CronJob runs `token-refresh.yaml` on a schedule (default: every 12h) to mint fresh SA tokens and distribute them to VMs.
 
-The CronJob schedule must be shorter than `TOKEN_DURATION` (default: 168h) to ensure tokens are refreshed before expiry. With the default settings, up to 14 consecutive missed runs can be tolerated before tokens expire.
+The CronJob schedule must be shorter than `token.duration` (default: 168h) to ensure tokens are refreshed before expiry. With the default settings, up to 14 consecutive missed runs can be tolerated before tokens expire.
 
 ## Load balancing with Istio
 
@@ -111,57 +111,55 @@ The Gateway resource itself must be deployed separately in the ingress gateway n
 
 ## Configuration
 
-### av-scanner service
+### Helm values
 
-Environment variables set on the VM (via Ansible role defaults or systemd override):
+| Value | Default | Description |
+|-------|---------|-------------|
+| `image.registry` | ghcr.io | Image registry |
+| `image.repository` | null-ptr-exception/av-scanner | Image repository |
+| `image.tag` | (Chart.appVersion) | Image tag |
+| `sshKey.existingSecret` | (required) | Secret containing `id_ed25519` key |
+| `inventory` | (see values.yaml) | Ansible inventory YAML |
+| `token.serviceAccount` | av-scanner | ServiceAccount to mint tokens for |
+| `token.duration` | 168h | Token expiry duration |
+| `controller.enabled` | true | Enable always-on controller pod |
+| `cronjob.schedule` | `0 */12 * * *` | Token refresh CronJob schedule |
+| `autoDeploy.enabled` | true | Enable post-install/upgrade hooks |
+| `preInstallCheck.enabled` | true | Enable SSH validation pre-install hook |
+| `istio.enabled` | false | Enable Istio load balancing resources |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3000 | HTTP server port |
-| `AV_ENGINE` | clamav | Active engine (`clamav` / `trendmicro`) |
-| `UPLOAD_DIR` | /tmp/av-scanner | Shared scan directory |
-| `MAX_FILE_SIZE` | 104857600 | Max upload size in bytes (100MB) |
-| `LOG_LEVEL` | info | Log level |
+### Ansible variables (inventory group_vars)
 
-#### ClamAV engine
+The av-scanner service on VMs is configured through Ansible variables set in the `inventory` value's `group_vars`. The Ansible role templates these into the systemd unit during deployment.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLAMAV_RTS_LOG_PATH` | /var/log/clamav/clamonacc.log | RTS log file |
-| `CLAMAV_SCAN_BINARY` | /usr/bin/clamdscan | On-demand scan binary |
-| `CLAMAV_TIMEOUT` | 15000 | Scan timeout (ms) |
-| `CLAMAV_RTS_CACHE_BASE_DELAY` | 500 | Base delay for RTS cache (ms) |
-| `CLAMAV_RTS_CACHE_DELAY_PER_MB` | 10 | Additional delay per MB (ms) |
+```yaml
+inventory: |
+  all:
+    vars:
+      ansible_ssh_private_key_file: /ssh/id_ed25519
+      av_engine: clamav
+      auth_enabled: true
+      k8s_api_endpoint: "http://kube-federated-auth.kube-federated-auth.svc:8080"
+    hosts:
+      vm1:
+        ansible_host: 192.168.122.178
+        ansible_user: ubuntu
+```
 
-#### Trend Micro DS Agent engine
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TM_RTS_LOG_PATH` | /var/log/ds_agent/ds_agent.log | RTS log file |
-| `TM_SCAN_BINARY` | /opt/ds_agent/dsa_scan | On-demand scan binary |
-| `TM_TIMEOUT` | 15000 | Scan timeout (ms) |
-| `TM_RTS_CACHE_BASE_DELAY` | 500 | Base delay for RTS cache (ms) |
-| `TM_RTS_CACHE_DELAY_PER_MB` | 10 | Additional delay per MB (ms) |
-
-### Authentication
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AUTH_ENABLED` | false | Enable SA token authentication |
-| `K8S_API_ENDPOINT` | (required if enabled) | URL of kube-federated-auth service |
-| `K8S_AUTH_TIMEOUT` | 5000 | Auth service timeout (ms) |
-| `AUTH_ALLOWLIST_FILE` | /etc/av-scanner/allowlist.yaml | Path to SA allowlist |
-| `K8S_AUTH_TOKEN_PATH` | (optional) | SA token for authenticating to kube-federated-auth |
-
-### Deployer (CronJob / controller pod)
-
-These env vars are read by the playbooks via `lookup('env', ...)`:
+#### General
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SA_NAME` | av-scanner | ServiceAccount to mint tokens for |
-| `SA_NAMESPACE` | av-scanner | Namespace of the ServiceAccount |
-| `TOKEN_DURATION` | 168h | Token expiry |
+| `av_engine` | clamav | Active engine (`clamav` / `trendmicro`) |
+
+#### Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `auth_enabled` | false | Enable SA token authentication |
+| `k8s_api_endpoint` | (required if auth enabled) | URL of kube-federated-auth service |
+| `auth_allowlist_file` | /etc/av-scanner/allowlist.yaml | Path to SA allowlist on VM |
+| `k8s_auth_token_path` | /etc/av-scanner/sa-token | Path to SA token on VM |
 
 ## Service management
 
