@@ -113,6 +113,8 @@ GWEOF
 
     # --- Build and load deployer image ---
     local deploy_image="av-scanner-deploy:e2e"
+    echo "# Pruning dangling Docker images..."
+    docker image prune -f || true
     echo "# Building deployer image..."
     docker build -f "${project_root}/docker/Dockerfile" \
         -t "$deploy_image" "$project_root"
