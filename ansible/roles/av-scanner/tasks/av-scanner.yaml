@@ -86,4 +86,4 @@
 
 - name: Display service status
   debug:
-    msg: "AV Scanner is running at http://{{ ansible_host }}:3000"
+    msg: "AV Scanner is running at http://{{ ansible_host }}:{{ port }}"
