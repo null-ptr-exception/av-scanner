@@ -7,6 +7,13 @@ release:
 set:
   sshKey.existingSecret: test-ssh-key
 tests:
+  - it: should not render when disabled
+    set:
+      cronjob.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
   - it: should render a CronJob with default values
     asserts:
       - isKind:
@@ -121,3 +128,31 @@ tests:
       - equal:
           path: spec.jobTemplate.spec.template.spec.serviceAccountName
           value: av-scanner-deployer
+
+  - it: should set default job params
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.backoffLimit
+          value: 2
+      - equal:
+          path: spec.jobTemplate.spec.activeDeadlineSeconds
+          value: 600
+      - equal:
+          path: spec.jobTemplate.spec.ttlSecondsAfterFinished
+          value: 3600
+
+  - it: should use custom job params
+    set:
+      cronjob.backoffLimit: 1
+      cronjob.activeDeadlineSeconds: 300
+      cronjob.ttlSecondsAfterFinished: 7200
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.backoffLimit
+          value: 1
+      - equal:
+          path: spec.jobTemplate.spec.activeDeadlineSeconds
+          value: 300
+      - equal:
+          path: spec.jobTemplate.spec.ttlSecondsAfterFinished
+          value: 7200

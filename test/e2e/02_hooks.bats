@@ -193,16 +193,16 @@ INVEOF
         --wait --timeout 600s
 }
 
-@test "post-upgrade: upgrade Job completed successfully" {
+@test "post-upgrade: deploy Job completed successfully" {
     local status
-    status=$(_kubectl -n av-scanner get job av-scanner-upgrade \
+    status=$(_kubectl -n av-scanner get job av-scanner-deploy \
         -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}')
     [[ "$status" == "True" ]]
 }
 
-@test "post-upgrade: upgrade Job logs show both VMs targeted" {
+@test "post-upgrade: deploy Job logs show both VMs targeted" {
     local logs
-    logs=$(_kubectl -n av-scanner logs job/av-scanner-upgrade)
+    logs=$(_kubectl -n av-scanner logs job/av-scanner-deploy)
     echo "$logs" | grep -q "PLAY RECAP"
     echo "$logs" | grep -Fq "vm1"
     echo "$logs" | grep -Fq "vm2"
