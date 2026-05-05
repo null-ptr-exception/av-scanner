@@ -1,0 +1,91 @@
+suite: Resources
+release:
+  name: av-scanner
+  namespace: av-scanner
+set:
+  sshKey.existingSecret: test-ssh-key
+tests:
+  - it: should not render resources when empty
+    templates:
+      - controller.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].resources
+
+  - it: should render resources on controller
+    templates:
+      - controller.yaml
+    set:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+  - it: should render resources on cronjob
+    templates:
+      - cronjob.yaml
+    set:
+      resources:
+        requests:
+          cpu: 100m
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 100m
+
+  - it: should render resources on post-install hook
+    templates:
+      - hook-deploy.yaml
+    set:
+      resources:
+        limits:
+          memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            limits:
+              memory: 512Mi
+
+  - it: should render resources on post-upgrade hook
+    templates:
+      - hook-upgrade.yaml
+    set:
+      resources:
+        limits:
+          memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            limits:
+              memory: 512Mi
+
+  - it: should render resources on pre-install hook
+    templates:
+      - hook-validate-ssh.yaml
+    set:
+      resources:
+        requests:
+          cpu: 50m
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 50m

@@ -28,6 +28,10 @@ spec:
           env:
             - name: INVENTORY
               value: {{ .Values.inventory | quote }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
