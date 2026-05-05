@@ -54,6 +54,11 @@ tests:
           content:
             name: TOKEN_DURATION
             value: "48h"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SA_NAMESPACE
+            value: "av-scanner"
 
   - it: should use deployer service account
     asserts:

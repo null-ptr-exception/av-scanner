@@ -47,6 +47,7 @@ setup_file() {
     # --- Clean Helm state ---
     helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner || true
     _kubectl delete namespace av-scanner --ignore-not-found
+    _kubectl wait --for=delete namespace/av-scanner --timeout=120s 2>/dev/null || true
     _kubectl create namespace av-scanner
 
     # --- SSH key secret ---
@@ -118,8 +119,8 @@ setup() {
     local logs
     logs=$(_kubectl -n av-scanner logs job/av-scanner-deploy)
     echo "$logs" | grep -q "PLAY RECAP"
-    echo "$logs" | grep -q "${E2E_VM1_IP}"
-    echo "$logs" | grep -q "${E2E_VM2_IP}"
+    echo "$logs" | grep -Fq "${E2E_VM1_IP}"
+    echo "$logs" | grep -Fq "${E2E_VM2_IP}"
 }
 
 @test "post-install: av-scanner service running on both VMs" {
@@ -203,8 +204,8 @@ INVEOF
     local logs
     logs=$(_kubectl -n av-scanner logs job/av-scanner-upgrade)
     echo "$logs" | grep -q "PLAY RECAP"
-    echo "$logs" | grep -q "${E2E_VM1_IP}"
-    echo "$logs" | grep -q "${E2E_VM2_IP}"
+    echo "$logs" | grep -Fq "${E2E_VM1_IP}"
+    echo "$logs" | grep -Fq "${E2E_VM2_IP}"
 }
 
 @test "post-upgrade: av-scanner still running after upgrade" {

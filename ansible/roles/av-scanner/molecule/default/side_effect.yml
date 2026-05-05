@@ -10,3 +10,7 @@
         url: "http://localhost:3000/api/v1/live"
         method: GET
         status_code: [200]
+      register: live_check
+      until: live_check.status == 200
+      retries: 10
+      delay: 3
