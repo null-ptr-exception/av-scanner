@@ -145,6 +145,32 @@ k6 run -e API_URL=http://<VM_IP>:3000 test/perf/loadtest.js
 
 Sends 80% clean / 20% infected (EICAR) files and verifies 100% correct scan results. If Prometheus is running, reports VM resource usage metrics after the test.
 
+## Releasing
+
+### Versioning scheme
+
+- **Chart version** (`version` in Chart.yaml): semver. Bump minor for new features or breaking value changes, patch for fixes.
+- **App version / image tag** (`appVersion` in Chart.yaml): `YYYYMMDD-rN` format (date + revision number). This is the Docker image tag.
+
+### Release steps
+
+1. Bump `version` and `appVersion` in `charts/av-scanner/Chart.yaml`
+2. Commit, push, merge PR
+3. Tag and push to trigger Docker image build:
+   ```bash
+   git tag <appVersion>
+   git push origin <appVersion>
+   ```
+4. The Docker workflow (`.github/workflows/docker.yaml`) builds and pushes the image on any tag push
+5. The Helm chart workflow (`.github/workflows/helm.yaml`) publishes the chart on push to master
+
+### When to bump
+
+- **appVersion (image tag)**: any change to Go code, Ansible roles/playbooks, Dockerfile, or anything bundled in the deployer image
+- **Chart version**: any change to Helm templates, values.yaml, or chart metadata
+
+If only docs or CI scripts change, no version bump is needed.
+
 ## Makefile targets
 
 | Target | Description |

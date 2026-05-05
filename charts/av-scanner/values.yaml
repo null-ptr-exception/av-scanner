@@ -1,3 +1,6 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   registry: ghcr.io
   repository: null-ptr-exception/av-scanner
@@ -49,10 +52,20 @@ istio:
   enabled: false
   # <namespace>/<name> of the Istio Gateway resource
   gatewayRef: ""
+  # Namespace where the gateway pods run (for exportTo)
+  gatewayNamespace: istio-system
   port: 3000
-  serviceHost: av-scanner.corp.localhost
-  workloadEntries: []
-  # - name: vm1
-  #   address: 192.168.64.2
-  # - name: vm2
-  #   address: 192.168.64.3
+  # Real external FQDN that the gateway matches on (Host header)
+  virtualServiceHost: av-scanner.corp.example.com
+  # Internal routing identifier registered in ServiceEntry (does not need real DNS)
+  serviceEntryHost: av-scanner.internal
+  loadBalancer: LEAST_CONN
+  outlierDetection:
+    consecutive5xxErrors: 3
+    interval: 30s
+    baseEjectionTime: 2m
+    maxEjectionPercent: 100
+  # VM endpoints
+  endpoints: []
+  # - address: 192.168.64.2
+  # - address: 192.168.64.3

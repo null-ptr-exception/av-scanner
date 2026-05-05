@@ -13,51 +13,76 @@ tests:
   - it: should fail when gatewayRef is empty
     set:
       istio.enabled: true
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
+      istio.endpoints:
+        - address: 10.0.0.1
     asserts:
       - failedTemplate:
           errorMessage: "istio.gatewayRef is required when istio.enabled=true"
 
-  - it: should fail when workloadEntries is empty
+  - it: should fail when endpoints is empty
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
     asserts:
       - failedTemplate:
-          errorMessage: "istio.workloadEntries must contain at least one entry when istio.enabled=true"
+          errorMessage: "istio.endpoints must contain at least one entry when istio.enabled=true"
 
-  - it: should render all resources with valid values
+  - it: should render three resources with valid values
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
+      istio.endpoints:
+        - address: 10.0.0.1
     asserts:
       - hasDocuments:
-          count: 4
+          count: 3
 
-  - it: should render ServiceEntry correctly
+  - it: should render VirtualService with virtualServiceHost
+    set:
+      istio.enabled: true
+      istio.gatewayRef: custom-ns/my-gateway
+      istio.virtualServiceHost: av-scanner.corp.example.com
+      istio.serviceEntryHost: av-scanner.internal
+      istio.port: 3000
+      istio.endpoints:
+        - address: 10.0.0.1
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: VirtualService
+      - equal:
+          path: spec.hosts[0]
+          value: av-scanner.corp.example.com
+      - equal:
+          path: spec.gateways[0]
+          value: custom-ns/my-gateway
+      - equal:
+          path: spec.http[0].route[0].destination.host
+          value: av-scanner.internal
+      - equal:
+          path: spec.http[0].route[0].destination.port.number
+          value: 3000
+
+  - it: should render ServiceEntry with serviceEntryHost and inline endpoints
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
-      istio.serviceHost: av-scanner.corp.localhost
+      istio.serviceEntryHost: av-scanner.internal
       istio.port: 3000
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
-    documentIndex: 0
+      istio.gatewayNamespace: istio-system
+      istio.endpoints:
+        - address: 10.0.0.1
+        - address: 10.0.0.2
+    documentIndex: 1
     asserts:
       - isKind:
           of: ServiceEntry
       - equal:
           path: spec.hosts[0]
-          value: av-scanner.corp.localhost
+          value: av-scanner.internal
       - equal:
           path: spec.location
-          value: MESH_INTERNAL
+          value: MESH_EXTERNAL
       - equal:
           path: spec.resolution
           value: STATIC
@@ -67,87 +92,58 @@ tests:
       - equal:
           path: spec.ports[0].protocol
           value: HTTP
-
-  - it: should render WorkloadEntry per VM
-    set:
-      istio.enabled: true
-      istio.gatewayRef: istio-system/av-scanner
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
-        - name: vm2
-          address: 10.0.0.2
-    asserts:
-      - hasDocuments:
-          count: 5
-      - isKind:
-          of: WorkloadEntry
-        documentIndex: 1
       - equal:
-          path: metadata.name
-          value: av-scanner-vm1
-        documentIndex: 1
-      - equal:
-          path: spec.address
+          path: spec.endpoints[0].address
           value: 10.0.0.1
-        documentIndex: 1
       - equal:
-          path: spec.labels.instance
-          value: vm1
-        documentIndex: 1
-      - isKind:
-          of: WorkloadEntry
-        documentIndex: 2
-      - equal:
-          path: metadata.name
-          value: av-scanner-vm2
-        documentIndex: 2
-      - equal:
-          path: spec.address
+          path: spec.endpoints[1].address
           value: 10.0.0.2
-        documentIndex: 2
+      - equal:
+          path: spec.exportTo[0]
+          value: "."
+      - equal:
+          path: spec.exportTo[1]
+          value: "istio-system"
 
-  - it: should render VirtualService with gateway reference
-    set:
-      istio.enabled: true
-      istio.gatewayRef: custom-ns/my-gateway
-      istio.serviceHost: scanner.example.com
-      istio.port: 8080
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
-    documentIndex: 2
-    asserts:
-      - isKind:
-          of: VirtualService
-      - equal:
-          path: spec.hosts[0]
-          value: scanner.example.com
-      - equal:
-          path: spec.gateways[0]
-          value: custom-ns/my-gateway
-      - equal:
-          path: spec.http[0].route[0].destination.host
-          value: scanner.example.com
-      - equal:
-          path: spec.http[0].route[0].destination.port.number
-          value: 8080
-
-  - it: should render DestinationRule with round-robin
+  - it: should render DestinationRule with serviceEntryHost
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
-      istio.serviceHost: av-scanner.corp.localhost
-      istio.workloadEntries:
-        - name: vm1
-          address: 10.0.0.1
-    documentIndex: 3
+      istio.serviceEntryHost: av-scanner.internal
+      istio.endpoints:
+        - address: 10.0.0.1
+    documentIndex: 2
     asserts:
       - isKind:
           of: DestinationRule
       - equal:
           path: spec.host
-          value: av-scanner.corp.localhost
+          value: av-scanner.internal
       - equal:
           path: spec.trafficPolicy.loadBalancer.simple
-          value: ROUND_ROBIN
+          value: LEAST_CONN
+      - equal:
+          path: spec.trafficPolicy.outlierDetection.consecutive5xxErrors
+          value: 3
+      - equal:
+          path: spec.trafficPolicy.outlierDetection.interval
+          value: 30s
+      - equal:
+          path: spec.trafficPolicy.outlierDetection.baseEjectionTime
+          value: 2m
+      - equal:
+          path: spec.trafficPolicy.outlierDetection.maxEjectionPercent
+          value: 100
+
+  - it: should use custom gatewayNamespace in exportTo
+    set:
+      istio.enabled: true
+      istio.gatewayRef: eps/routable-gateway
+      istio.gatewayNamespace: eps
+      istio.endpoints:
+        - address: 10.0.0.1
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.exportTo[1]
+          value: "eps"
