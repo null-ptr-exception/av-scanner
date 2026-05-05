@@ -8,7 +8,11 @@ image:
   tag: ""
 
 cronjob:
+  enabled: true
   schedule: "0 */12 * * *"
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
 
 controller:
   enabled: true
@@ -47,6 +51,9 @@ preInstallCheck:
 # Post-install: mints token + full deploy. Post-upgrade: deploy only (no new token).
 autoDeploy:
   enabled: true
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
 
 podAnnotations:
   sidecar.istio.io/inject: "false"

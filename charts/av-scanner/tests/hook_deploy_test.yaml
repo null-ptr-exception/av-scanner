@@ -1,4 +1,4 @@
-suite: Post-install Deploy Hook
+suite: Post-install/upgrade Deploy Hook
 templates:
   - hook-deploy.yaml
 release:
@@ -22,14 +22,42 @@ tests:
           path: metadata.name
           value: av-scanner-deploy
 
-  - it: should have post-install hook annotation
+  - it: should have post-install and post-upgrade hook annotation
     asserts:
       - equal:
           path: metadata.annotations["helm.sh/hook"]
-          value: post-install
+          value: post-install,post-upgrade
       - equal:
           path: metadata.annotations["helm.sh/hook-delete-policy"]
           value: before-hook-creation
+
+  - it: should set default job params
+    asserts:
+      - equal:
+          path: spec.backoffLimit
+          value: 2
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 600
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 3600
+
+  - it: should use custom job params
+    set:
+      autoDeploy.backoffLimit: 1
+      autoDeploy.activeDeadlineSeconds: 300
+      autoDeploy.ttlSecondsAfterFinished: 7200
+    asserts:
+      - equal:
+          path: spec.backoffLimit
+          value: 1
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 300
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 7200
 
   - it: should run deploy playbook
     asserts:

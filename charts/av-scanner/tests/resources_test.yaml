@@ -62,20 +62,6 @@ tests:
             limits:
               memory: 512Mi
 
-  - it: should render resources on post-upgrade hook
-    templates:
-      - hook-upgrade.yaml
-    set:
-      resources:
-        limits:
-          memory: 512Mi
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].resources
-          value:
-            limits:
-              memory: 512Mi
-
   - it: should render resources on pre-install hook
     templates:
       - hook-validate-ssh.yaml

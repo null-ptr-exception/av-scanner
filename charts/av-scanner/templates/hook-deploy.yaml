@@ -7,12 +7,12 @@ metadata:
   labels:
     {{- include "av-scanner.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: post-install
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
-  backoffLimit: 2
-  activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 3600
+  backoffLimit: {{ .Values.autoDeploy.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.autoDeploy.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.autoDeploy.ttlSecondsAfterFinished }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
