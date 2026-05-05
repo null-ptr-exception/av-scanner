@@ -62,6 +62,8 @@ INVEOF
         --set-string "inventory=${inventory}" \
         --set istio.enabled=true \
         --set istio.gatewayRef=istio-system/av-scanner \
+        --set istio.virtualServiceHost=av-scanner.corp.localhost \
+        --set istio.serviceEntryHost=av-scanner.internal \
         --set "istio.endpoints[0].address=${E2E_VM1_IP}" \
         --set "istio.endpoints[1].address=${E2E_VM2_IP}" \
         --wait --timeout 600s

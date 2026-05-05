@@ -37,11 +37,12 @@ tests:
       - hasDocuments:
           count: 3
 
-  - it: should render VirtualService with gateway reference
+  - it: should render VirtualService with virtualServiceHost
     set:
       istio.enabled: true
       istio.gatewayRef: custom-ns/my-gateway
-      istio.serviceHost: av-scanner.internal
+      istio.virtualServiceHost: av-scanner.corp.example.com
+      istio.serviceEntryHost: av-scanner.internal
       istio.port: 3000
       istio.endpoints:
         - address: 10.0.0.1
@@ -51,7 +52,7 @@ tests:
           of: VirtualService
       - equal:
           path: spec.hosts[0]
-          value: av-scanner.internal
+          value: av-scanner.corp.example.com
       - equal:
           path: spec.gateways[0]
           value: custom-ns/my-gateway
@@ -62,11 +63,11 @@ tests:
           path: spec.http[0].route[0].destination.port.number
           value: 3000
 
-  - it: should render ServiceEntry with inline endpoints
+  - it: should render ServiceEntry with serviceEntryHost and inline endpoints
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
-      istio.serviceHost: av-scanner.internal
+      istio.serviceEntryHost: av-scanner.internal
       istio.port: 3000
       istio.gatewayNamespace: istio-system
       istio.endpoints:
@@ -104,11 +105,11 @@ tests:
           path: spec.exportTo[1]
           value: "istio-system"
 
-  - it: should render DestinationRule with LEAST_CONN and outlier detection
+  - it: should render DestinationRule with serviceEntryHost
     set:
       istio.enabled: true
       istio.gatewayRef: istio-system/av-scanner
-      istio.serviceHost: av-scanner.internal
+      istio.serviceEntryHost: av-scanner.internal
       istio.endpoints:
         - address: 10.0.0.1
     documentIndex: 2

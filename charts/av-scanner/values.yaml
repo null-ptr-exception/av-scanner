@@ -55,8 +55,10 @@ istio:
   # Namespace where the gateway pods run (for exportTo)
   gatewayNamespace: istio-system
   port: 3000
-  # Internal hostname used as routing identifier (does not need real DNS)
-  serviceHost: av-scanner.internal
+  # Real external FQDN that the gateway matches on (Host header)
+  virtualServiceHost: av-scanner.corp.example.com
+  # Internal routing identifier registered in ServiceEntry (does not need real DNS)
+  serviceEntryHost: av-scanner.internal
   loadBalancer: LEAST_CONN
   outlierDetection:
     consecutive5xxErrors: 3

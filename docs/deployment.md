@@ -98,9 +98,10 @@ The Helm chart can optionally create Istio resources (VirtualService, ServiceEnt
 ```yaml
 istio:
   enabled: true
-  gatewayRef: istio-system/av-scanner   # cross-namespace Gateway reference
-  gatewayNamespace: istio-system        # for exportTo scoping
-  serviceHost: av-scanner.internal      # internal routing identifier
+  gatewayRef: istio-system/av-scanner        # cross-namespace Gateway reference
+  gatewayNamespace: istio-system             # for exportTo scoping
+  virtualServiceHost: av-scanner.corp.example.com  # real external FQDN
+  serviceEntryHost: av-scanner.internal      # internal routing identifier
   endpoints:
   - address: 192.168.122.178
   - address: 192.168.122.45

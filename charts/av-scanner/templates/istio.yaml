@@ -12,13 +12,13 @@ metadata:
     {{- include "av-scanner.labels" . | nindent 4 }}
 spec:
   hosts:
-  - {{ .Values.istio.serviceHost }}
+  - {{ .Values.istio.virtualServiceHost }}
   gateways:
   - {{ $gatewayRef }}
   http:
   - route:
     - destination:
-        host: {{ .Values.istio.serviceHost }}
+        host: {{ .Values.istio.serviceEntryHost }}
         port:
           number: {{ .Values.istio.port }}
 ---
@@ -31,7 +31,7 @@ metadata:
     {{- include "av-scanner.labels" . | nindent 4 }}
 spec:
   hosts:
-  - {{ .Values.istio.serviceHost }}
+  - {{ .Values.istio.serviceEntryHost }}
   ports:
   - number: {{ .Values.istio.port }}
     name: http
@@ -54,7 +54,7 @@ metadata:
   labels:
     {{- include "av-scanner.labels" . | nindent 4 }}
 spec:
-  host: {{ .Values.istio.serviceHost }}
+  host: {{ .Values.istio.serviceEntryHost }}
   trafficPolicy:
     loadBalancer:
       simple: {{ .Values.istio.loadBalancer }}
