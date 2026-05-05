@@ -139,7 +139,7 @@ inventory: |
       ansible_ssh_private_key_file: /ssh/id_ed25519
       av_engine: clamav
       auth_enabled: true
-      k8s_api_endpoint: "http://kube-federated-auth.kube-federated-auth.svc:8080"
+      k8s_api_endpoint: "https://kube-federated-auth.example.com"
     hosts:
       vm1:
         ansible_host: 192.168.122.178
