@@ -23,6 +23,13 @@ spec:
           command:
             - ansible-playbook
             - playbooks/deploy.yaml
+          env:
+            - name: SA_NAME
+              value: {{ .Values.token.serviceAccount | quote }}
+            - name: SA_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: TOKEN_DURATION
+              value: {{ .Values.token.duration | quote }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh

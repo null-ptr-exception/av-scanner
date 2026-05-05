@@ -1,17 +1,10 @@
 #!/usr/bin/env bats
-# End-to-end tests for av-scanner
+# Scan and auth e2e tests for av-scanner.
 #
-# Deploys the controller Deployment into a kind cluster, runs molecule
-# inside it to deploy av-scanner to 2 VMs, then tests scan and auth
-# behavior from outside.
+# Deploys via molecule inside the controller pod, then tests scan/auth
+# behavior through the Istio gateway.
 #
-# Requires: kind, docker, kubectl, helm, virsh
-#
-# Prerequisites:
-#   ./scripts/vm-init.sh --name e2e --count 2
-#
-# Env vars:
-#   E2E_CLEAN_ALL=1   - delete all artifacts (VMs, kind cluster) on teardown
+# Suite-level infra (VMs, kind, Istio, image) is handled by setup_suite.bash.
 
 setup_file() {
     load 'vm_helper'
@@ -20,96 +13,11 @@ setup_file() {
     local project_root
     project_root="$(get_project_root)"
 
-    # --- VMs ---
     e2e_vm_setup
 
-    # --- Kind cluster ---
     export KIND_CLUSTER="av-scanner-e2e"
     export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
-
-    if ! kind get clusters | grep -q "^${KIND_CLUSTER}$"; then
-        echo "# Creating kind cluster ${KIND_CLUSTER}..."
-        kind create cluster --name "$KIND_CLUSTER" \
-            --config "${project_root}/test/kind-config.yaml" \
-            --wait 60s
-    fi
     kind export kubeconfig --name "$KIND_CLUSTER"
-
-    # --- Istio ingress gateway ---
-    if ! _kubectl get namespace istio-system &>/dev/null; then
-        echo "# Installing Istio..."
-        local istioctl_bin
-        istioctl_bin=$(command -v istioctl || echo "/tmp/istioctl")
-        if [[ ! -x "$istioctl_bin" ]]; then
-            echo "# ERROR: istioctl not found"
-            false
-        fi
-        "$istioctl_bin" install --context "$KUBE_CONTEXT" --set profile=default \
-            --set values.gateways.istio-ingressgateway.type=NodePort -y
-    fi
-    _kubectl -n istio-system patch svc istio-ingressgateway --type='json' \
-        -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30080}]'
-    _kubectl -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
-
-    # --- Istio Gateway (lives in istio-system with the ingress gateway pods) ---
-    echo "# Reconciling Istio Gateway in istio-system..."
-    _kubectl apply -f - <<'GWEOF'
-apiVersion: networking.istio.io/v1beta1
-kind: Gateway
-metadata:
-  name: av-scanner
-  namespace: istio-system
-spec:
-  selector:
-    istio: ingressgateway
-  servers:
-  - port:
-      number: 80
-      name: http
-      protocol: HTTP
-    hosts:
-    - "*.corp.localhost"
-GWEOF
-
-    # --- Route from kind node to virbr0 so pods can SSH to VMs ---
-    local virbr0_subnet
-    virbr0_subnet=$(ip -4 route show dev virbr0 proto kernel | awk '{print $1}')
-    if [[ -n "$virbr0_subnet" ]]; then
-        local kind_node="${KIND_CLUSTER}-control-plane"
-        local host_gateway
-        host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
-        if [[ -n "$host_gateway" ]]; then
-            echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
-            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" || true
-            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE || true
-        fi
-    fi
-
-    # --- Build and load deployer image ---
-    local deploy_image="av-scanner-deploy:e2e"
-    echo "# Building deployer image..."
-    docker build -f "${project_root}/docker/Dockerfile" \
-        -t "$deploy_image" "$project_root"
-    kind load docker-image "$deploy_image" --name "$KIND_CLUSTER"
-
-    # --- kube-federated-auth ---
-    local kfa_image="ghcr.io/rophy/kube-federated-auth:3.4.2"
-    if ! docker image inspect "$kfa_image" >/dev/null; then
-        local kfa_dir="${project_root}/../kube-federated-auth"
-        if [[ -d "$kfa_dir" ]]; then
-            echo "# Building ${kfa_image} from local source..."
-            docker build -t "$kfa_image" "$kfa_dir"
-        else
-            echo "# Pulling ${kfa_image}..."
-            docker pull "$kfa_image"
-        fi
-    fi
-    kind load docker-image "$kfa_image" --name "$KIND_CLUSTER"
-
-    echo "# Deploying kube-federated-auth..."
-    _kubectl apply -f "${project_root}/test/kube-federated-auth.yaml"
-    _kubectl rollout status deployment/kube-federated-auth \
-        -n kube-federated-auth --timeout=120s
 
     # --- kube-federated-auth endpoint as seen from the VMs ---
     local vm_gateway
@@ -267,16 +175,7 @@ INVEOF
 }
 
 teardown_file() {
-    load 'vm_helper'
-    load 'test_helper'
-    e2e_vm_teardown
-
-    if [[ "${E2E_CLEAN_ALL:-0}" == "1" ]]; then
-        echo "# Cleaning up Helm release..."
-        helm uninstall av-scanner --kube-context "kind-av-scanner-e2e" -n av-scanner || true
-        echo "# Deleting kind cluster..."
-        kind delete cluster --name av-scanner-e2e || true
-    fi
+    :
 }
 
 setup() {
