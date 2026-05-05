@@ -57,6 +57,12 @@ istio:
   port: 3000
   # Internal hostname used as routing identifier (does not need real DNS)
   serviceHost: av-scanner.internal
+  loadBalancer: LEAST_CONN
+  outlierDetection:
+    consecutive5xxErrors: 3
+    interval: 30s
+    baseEjectionTime: 2m
+    maxEjectionPercent: 100
   # VM endpoints
   endpoints: []
   # - address: 192.168.64.2

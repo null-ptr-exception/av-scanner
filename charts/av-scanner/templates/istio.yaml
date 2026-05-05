@@ -57,10 +57,10 @@ spec:
   host: {{ .Values.istio.serviceHost }}
   trafficPolicy:
     loadBalancer:
-      simple: LEAST_CONN
+      simple: {{ .Values.istio.loadBalancer }}
     outlierDetection:
-      consecutive5xxErrors: 3
-      interval: 30s
-      baseEjectionTime: 2m
-      maxEjectionPercent: 100
+      consecutive5xxErrors: {{ .Values.istio.outlierDetection.consecutive5xxErrors }}
+      interval: {{ .Values.istio.outlierDetection.interval }}
+      baseEjectionTime: {{ .Values.istio.outlierDetection.baseEjectionTime }}
+      maxEjectionPercent: {{ .Values.istio.outlierDetection.maxEjectionPercent }}
 {{- end }}
