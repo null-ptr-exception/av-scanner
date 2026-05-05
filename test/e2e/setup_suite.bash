@@ -73,8 +73,17 @@ setup_suite() {
         "$istioctl_bin" install --context "$KUBE_CONTEXT" --set profile=default \
             --set values.gateways.istio-ingressgateway.type=NodePort -y
     fi
+    local http_port_idx
+    http_port_idx="$(
+        kubectl --context "$KUBE_CONTEXT" -n istio-system get svc istio-ingressgateway -o json \
+          | jq '.spec.ports | map(.port) | index(80)'
+    )"
+    if [[ "$http_port_idx" == "null" || -z "$http_port_idx" ]]; then
+        echo "# ERROR: HTTP port 80 not found on istio-ingressgateway"
+        return 1
+    fi
     kubectl --context "$KUBE_CONTEXT" -n istio-system patch svc istio-ingressgateway --type='json' \
-        -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30080}]'
+        -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/${http_port_idx}/nodePort\",\"value\":30080}]"
     kubectl --context "$KUBE_CONTEXT" -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
 
     # --- Istio Gateway ---
@@ -106,8 +115,10 @@ GWEOF
         host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
         if [[ -n "$host_gateway" ]]; then
             echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
-            docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway" || true
-            docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE || true
+            docker exec "$kind_node" ip route show "$virbr0_subnet" | grep -q "via $host_gateway" \
+                || docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway"
+            docker exec "$kind_node" iptables -t nat -C POSTROUTING -d "$virbr0_subnet" -j MASQUERADE 2>/dev/null \
+                || docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE
         fi
     fi
 
