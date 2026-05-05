@@ -1,0 +1,325 @@
+suite: Pod scheduling and annotations
+release:
+  name: av-scanner
+  namespace: av-scanner
+set:
+  sshKey.existingSecret: test-ssh-key
+tests:
+  # --- podAnnotations ---
+  - it: should render default podAnnotations on controller
+    templates:
+      - controller.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+
+  - it: should render custom podAnnotations on controller
+    templates:
+      - controller.yaml
+    set:
+      podAnnotations:
+        sidecar.istio.io/inject: "false"
+        custom/annotation: "value"
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+            custom/annotation: "value"
+
+  - it: should render podAnnotations on cronjob
+    templates:
+      - cronjob.yaml
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+
+  - it: should render podAnnotations on post-install hook
+    templates:
+      - hook-deploy.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+
+  - it: should render podAnnotations on post-upgrade hook
+    templates:
+      - hook-upgrade.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+
+  - it: should render podAnnotations on pre-install hook
+    templates:
+      - hook-validate-ssh.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            sidecar.istio.io/inject: "false"
+
+  # --- nodeSelector ---
+  - it: should not render nodeSelector when empty
+    templates:
+      - controller.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.nodeSelector
+
+  - it: should render nodeSelector on controller
+    templates:
+      - controller.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            disktype: ssd
+
+  - it: should render nodeSelector on cronjob
+    templates:
+      - cronjob.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.nodeSelector
+          value:
+            disktype: ssd
+
+  - it: should render nodeSelector on post-install hook
+    templates:
+      - hook-deploy.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            disktype: ssd
+
+  - it: should render nodeSelector on post-upgrade hook
+    templates:
+      - hook-upgrade.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            disktype: ssd
+
+  - it: should render nodeSelector on pre-install hook
+    templates:
+      - hook-validate-ssh.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            disktype: ssd
+
+  # --- tolerations ---
+  - it: should not render tolerations when empty
+    templates:
+      - controller.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.tolerations
+
+  - it: should render tolerations on controller
+    templates:
+      - controller.yaml
+    set:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "av-scanner"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0]
+          value:
+            key: "dedicated"
+            operator: "Equal"
+            value: "av-scanner"
+            effect: "NoSchedule"
+
+  - it: should render tolerations on cronjob
+    templates:
+      - cronjob.yaml
+    set:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "av-scanner"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.tolerations[0]
+          value:
+            key: "dedicated"
+            operator: "Equal"
+            value: "av-scanner"
+            effect: "NoSchedule"
+
+  - it: should render tolerations on post-install hook
+    templates:
+      - hook-deploy.yaml
+    set:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "av-scanner"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0]
+          value:
+            key: "dedicated"
+            operator: "Equal"
+            value: "av-scanner"
+            effect: "NoSchedule"
+
+  - it: should render tolerations on post-upgrade hook
+    templates:
+      - hook-upgrade.yaml
+    set:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "av-scanner"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0]
+          value:
+            key: "dedicated"
+            operator: "Equal"
+            value: "av-scanner"
+            effect: "NoSchedule"
+
+  - it: should render tolerations on pre-install hook
+    templates:
+      - hook-validate-ssh.yaml
+    set:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "av-scanner"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0]
+          value:
+            key: "dedicated"
+            operator: "Equal"
+            value: "av-scanner"
+            effect: "NoSchedule"
+
+  # --- affinity ---
+  - it: should not render affinity when empty
+    templates:
+      - controller.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: should render affinity on controller
+    templates:
+      - controller.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.nodeAffinity
+
+  - it: should render affinity on cronjob
+    templates:
+      - cronjob.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+    asserts:
+      - exists:
+          path: spec.jobTemplate.spec.template.spec.affinity.nodeAffinity
+
+  - it: should render affinity on post-install hook
+    templates:
+      - hook-deploy.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.nodeAffinity
+
+  - it: should render affinity on post-upgrade hook
+    templates:
+      - hook-upgrade.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.nodeAffinity
+
+  - it: should render affinity on pre-install hook
+    templates:
+      - hook-validate-ssh.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.nodeAffinity
