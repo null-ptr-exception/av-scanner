@@ -30,6 +30,10 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: TOKEN_DURATION
               value: {{ .Values.token.duration | quote }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ssh-key
               mountPath: /ssh
