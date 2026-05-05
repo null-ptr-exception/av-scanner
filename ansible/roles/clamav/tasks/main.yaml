@@ -6,6 +6,21 @@
       - clamav-freshclam
     state: present
 
+- name: Check if ClamAV databases exist
+  stat:
+    path: /var/lib/clamav/daily.cvd
+  register: clamav_db
+
+- name: Stop freshclam service for initial database sync
+  systemd:
+    name: clamav-freshclam
+    state: stopped
+  when: not clamav_db.stat.exists
+
+- name: Run freshclam to download signature databases
+  command: freshclam
+  when: not clamav_db.stat.exists
+
 - name: Ensure freshclam is enabled and running
   systemd:
     name: clamav-freshclam

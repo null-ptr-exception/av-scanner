@@ -2,7 +2,7 @@ av_engine: clamav
 binary_path: /app/av-scanner
 node_exporter_path: /app/node_exporter
 scan_dir: /tmp/av-scanner
-port: 3000
+av_scanner_port: 3000
 log_level: info
 clamav_rts_log_path: /var/log/clamav/clamonacc.log
 tm_rts_log_path: /var/log/ds_agent/ds_agent.log

@@ -41,7 +41,7 @@
       [Service]
       Type=simple
       User=root
-      Environment=PORT={{ port }}
+      Environment=PORT={{ av_scanner_port }}
       Environment=AV_ENGINE={{ av_engine }}
       Environment=UPLOAD_DIR={{ scan_dir }}
       {% if av_engine == "clamav" %}
@@ -76,7 +76,7 @@
 
 - name: Wait for service to be ready
   uri:
-    url: "http://localhost:{{ port }}/api/v1/live"
+    url: "http://localhost:{{ av_scanner_port }}/api/v1/live"
     method: GET
     status_code: [200]
   register: health_check
@@ -86,4 +86,4 @@
 
 - name: Display service status
   debug:
-    msg: "AV Scanner is running at http://{{ ansible_host }}:{{ port }}"
+    msg: "AV Scanner is running at http://{{ ansible_host }}:{{ av_scanner_port }}"

@@ -119,8 +119,8 @@ setup() {
     local logs
     logs=$(_kubectl -n av-scanner logs job/av-scanner-deploy)
     echo "$logs" | grep -q "PLAY RECAP"
-    echo "$logs" | grep -Fq "${E2E_VM1_IP}"
-    echo "$logs" | grep -Fq "${E2E_VM2_IP}"
+    echo "$logs" | grep -Fq "vm1"
+    echo "$logs" | grep -Fq "vm2"
 }
 
 @test "post-install: av-scanner service running on both VMs" {
@@ -204,8 +204,8 @@ INVEOF
     local logs
     logs=$(_kubectl -n av-scanner logs job/av-scanner-upgrade)
     echo "$logs" | grep -q "PLAY RECAP"
-    echo "$logs" | grep -Fq "${E2E_VM1_IP}"
-    echo "$logs" | grep -Fq "${E2E_VM2_IP}"
+    echo "$logs" | grep -Fq "vm1"
+    echo "$logs" | grep -Fq "vm2"
 }
 
 @test "post-upgrade: av-scanner still running after upgrade" {

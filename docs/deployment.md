@@ -151,7 +151,7 @@ inventory: |
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `av_engine` | clamav | Active engine (`clamav` / `trendmicro`) |
-| `port` | 3000 | HTTP server port |
+| `av_scanner_port` | 3000 | HTTP server port |
 | `scan_dir` | /tmp/av-scanner | Upload/scan directory |
 | `log_level` | info | Log level |
 

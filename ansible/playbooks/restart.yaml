@@ -13,7 +13,7 @@
 
     - name: Wait for service to be ready
       uri:
-        url: "http://localhost:{{ port | default(3000) }}/api/v1/live"
+        url: "http://localhost:{{ av_scanner_port | default(3000) }}/api/v1/live"
         method: GET
         status_code: [200]
       register: health_check
