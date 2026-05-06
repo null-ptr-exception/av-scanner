@@ -1,0 +1,42 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: av-scanner
+
+build:
+  artifacts:
+    - image: av-scanner-deploy
+      docker:
+        dockerfile: docker/Dockerfile
+  local:
+    push: false
+
+deploy:
+  kubeContext: av-scanner
+  helm:
+    releases:
+      - name: av-scanner
+        chartPath: charts/av-scanner
+        namespace: av-scanner
+        createNamespace: true
+        valuesFiles:
+          - skaffold-values.yaml
+        setValues:
+          controller.enabled: "true"
+          image.registry: ""
+          image.repository: av-scanner-deploy
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG_av_scanner_deploy}}"
+        wait: true
+
+profiles:
+  - name: e2e
+    patches:
+      - op: add
+        path: /deploy/helm/releases/0/valuesFiles/-
+        value: .e2e-values.yaml
+  - name: e2e-hooks
+    patches:
+      - op: replace
+        path: /deploy/helm/releases/0/setValues/controller.enabled
+        value: "false"

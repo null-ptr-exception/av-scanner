@@ -39,12 +39,11 @@ jobs:
               bats cloud-image-utils virtinst libvirt-daemon-system qemu-utils
           fi
 
-      - name: Install kind
+      - name: Install minikube
         run: |
-          if ! command -v kind &>/dev/null; then
-            curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
-            echo "a6875aaea358acf0ac07786b1a6755d08fd640f4c79b7a2e46681cc13f49a04b  /tmp/kind" | sha256sum -c -
-            chmod +x /tmp/kind && sudo mv /tmp/kind /usr/local/bin/kind
+          if ! command -v minikube &>/dev/null; then
+            curl -Lo /tmp/minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+            chmod +x /tmp/minikube && sudo mv /tmp/minikube /usr/local/bin/minikube
           fi
 
       - name: Install kubectl
@@ -79,10 +78,21 @@ jobs:
         run: VM_MEMORY=2048 ./scripts/vm-init.sh --name e2e --count 2 --force
 
       - name: Run e2e tests
-        run: bats --print-output-on-failure --show-output-of-passing-tests --verbose-run test/e2e/
+        run: |
+          mkdir -p test-results
+          bats --formatter tap --report-formatter junit --output test-results \
+            --print-output-on-failure --show-output-of-passing-tests --verbose-run -x test/e2e/
+
+      - name: Test Report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: E2E Test Results
+          path: test-results/*.xml
+          reporter: java-junit
 
       - name: Cleanup
         if: always()
         run: |
           ./scripts/vm-destroy.sh --name e2e --count 2
-          kind delete cluster --name av-scanner-e2e || true
+          minikube delete --profile av-scanner || true

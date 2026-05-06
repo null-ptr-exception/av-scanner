@@ -2,7 +2,7 @@
 - import_playbook: ../../../../playbooks/restart.yaml
 
 - name: Verify both VMs healthy after rolling restart
-  hosts: all
+  hosts: av_scanner
   gather_facts: false
   tasks:
     - name: Health check

@@ -34,6 +34,9 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: TOKEN_DURATION
               value: {{ .Values.token.duration | quote }}
+          {{- with .Values.controller.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

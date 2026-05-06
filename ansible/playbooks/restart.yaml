@@ -1,6 +1,6 @@
 ---
 - name: Restart AV Scanner service
-  hosts: all
+  hosts: av_scanner
   serial: 1
   become: true
   gather_facts: false

@@ -1,6 +1,6 @@
 ---
 - name: Verify av-scanner deployment
-  hosts: all
+  hosts: av_scanner
   become: true
   gather_facts: false
   vars:
