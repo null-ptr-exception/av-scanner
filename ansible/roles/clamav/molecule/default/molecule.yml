@@ -17,9 +17,9 @@ provisioner:
   inventory:
     host_vars:
       vm1:
-        ansible_host: ${MOLECULE_VM1_IP}
+        ansible_host: ${AV_SCANNER_VM1_IP}
         ansible_user: ubuntu
-        ansible_ssh_private_key_file: ${MOLECULE_SSH_KEY}
+        ansible_ssh_private_key_file: ${AV_SCANNER_SSH_KEY:-/ssh/id_ed25519}
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 verifier:

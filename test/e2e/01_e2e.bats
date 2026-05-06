@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 # Scan and auth e2e tests for av-scanner.
 #
-# Deploys via molecule inside the controller pod, then tests scan/auth
-# behavior through the Istio gateway.
+# Deploys via skaffold (e2e profile) + molecule inside the controller pod,
+# then tests scan/auth behavior through the Istio gateway.
 #
-# Suite-level infra (VMs, kind, Istio, image) is handled by setup_suite.bash.
+# Suite-level infra (VMs, Istio, kfa) is handled by setup_suite.bash.
 
 setup_file() {
     load 'vm_helper'
@@ -15,58 +15,19 @@ setup_file() {
 
     e2e_vm_setup
 
-    export KIND_CLUSTER="av-scanner-e2e"
-    export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
-    kind export kubeconfig --name "$KIND_CLUSTER"
+    export MINIKUBE_PROFILE="av-scanner"
+    export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
 
     # --- kube-federated-auth endpoint as seen from the VMs ---
     local vm_gateway
     vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
     local kfa_endpoint="http://${vm_gateway}:30082"
 
-    # --- Clean slate for Helm ---
-    helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner || true
-    _kubectl delete namespace av-scanner --ignore-not-found
-    _kubectl create namespace av-scanner
+    # --- Deploy via skaffold ---
+    (cd "$project_root" && skaffold delete) >&3 2>&1 || true
 
-    # --- SSH key secret ---
-    _kubectl -n av-scanner create secret generic av-scanner-ssh-key \
-        --from-file=id_ed25519="${E2E_SSH_KEY}"
-
-    # --- Helm install with controller ---
-    local inventory
-    inventory=$(cat <<INVEOF
-all:
-  vars:
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    ansible_ssh_private_key_file: /ssh/id_ed25519
-  hosts:
-    vm1:
-      ansible_host: ${E2E_VM1_IP}
-      ansible_user: ubuntu
-    vm2:
-      ansible_host: ${E2E_VM2_IP}
-      ansible_user: ubuntu
-INVEOF
-)
-
-    echo "# Installing Helm chart..."
-    helm upgrade --install av-scanner "${project_root}/charts/av-scanner" \
-        --kube-context "$KUBE_CONTEXT" \
-        -n av-scanner --create-namespace \
-        --set controller.enabled=true \
-        --set image.registry="" \
-        --set image.repository=av-scanner-deploy \
-        --set image.tag=e2e \
-        --set sshKey.existingSecret=av-scanner-ssh-key \
-        --set-string "inventory=${inventory}" \
-        --set istio.enabled=true \
-        --set istio.gatewayRef=istio-system/av-scanner \
-        --set istio.virtualServiceHost=av-scanner.corp.localhost \
-        --set istio.serviceEntryHost=av-scanner.internal \
-        --set "istio.endpoints[0].address=${E2E_VM1_IP}" \
-        --set "istio.endpoints[1].address=${E2E_VM2_IP}" \
-        --wait --timeout 600s
+    echo "# Deploying via skaffold (e2e profile)..." >&3
+    (cd "$project_root" && skaffold run -p e2e) >&3 2>&1
 
     # --- Test service accounts ---
     _kubectl create namespace test-client --dry-run=client -o yaml | _kubectl apply -f -
@@ -87,15 +48,6 @@ INVEOF
     # --- Run molecule inside controller pod ---
     echo "# Running molecule inside controller pod..."
 
-    # Verify network connectivity from kind node and controller pod to VMs
-    local kind_node="${KIND_CLUSTER}-control-plane"
-    echo "# DEBUG: kind node routes:"
-    docker exec "$kind_node" ip route 2>&1 | while IFS= read -r l; do echo "# $l"; done
-    echo "# DEBUG: host nftables ruleset:"
-    sudo nft list ruleset 2>&1 | while IFS= read -r l; do echo "# $l"; done || true
-    echo "# DEBUG: host iptables FORWARD chain (first 20 rules):"
-    sudo iptables -L FORWARD -n -v 2>&1 | head -25 | while IFS= read -r l; do echo "# $l"; done || true
-
     for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
         echo "# Testing SSH to ${vm_ip} from controller pod..."
         if ! _kubectl -n av-scanner exec "$controller_pod" -- \
@@ -107,37 +59,17 @@ INVEOF
         fi
     done
 
-    # Write allowlist content to a file inside the pod (avoids quoting issues)
-    _kubectl -n av-scanner exec "$controller_pod" -- bash -c \
-        'printf "allowlist:\n  - test-client/scanner-client\n" > /tmp/allowlist.yaml'
+    # Extract allowlist from mounted ConfigMap
+    _kubectl -n av-scanner exec "$controller_pod" -- \
+        python3 -c "import yaml; inv=yaml.safe_load(open('/etc/ansible/hosts')); open('/tmp/allowlist.yaml','w').write(inv['all']['vars']['auth_allowlist_content'])"
 
-    local molecule_log="/tmp/e2e-molecule.log"
-    local molecule_rc=0
+    echo "# Running molecule test..." >&3
     _kubectl -n av-scanner exec "$controller_pod" -- env \
-        MOLECULE_VM1_IP="${E2E_VM1_IP}" \
-        MOLECULE_VM2_IP="${E2E_VM2_IP}" \
-        MOLECULE_SSH_KEY="/ssh/id_ed25519" \
-        MOLECULE_AV_SCANNER_BINARY="/app/av-scanner" \
-        MOLECULE_NODE_EXPORTER_BINARY="/app/node_exporter" \
         MOLECULE_AUTH_ENABLED="true" \
         MOLECULE_K8S_API_ENDPOINT="${kfa_endpoint}" \
         MOLECULE_AUTH_ALLOWLIST_FILE="/tmp/allowlist.yaml" \
-        MOLECULE_TOKEN_FILE="/tmp/sa-token" \
         bash -c "cd /app/ansible/roles/av-scanner && molecule test --destroy never" \
-        > "$molecule_log" 2>&1 || molecule_rc=$?
-
-    # Show molecule summary
-    echo "# --- Molecule output ---"
-    grep -E 'INFO|WARNING|ERROR|CRITICAL|PLAY RECAP|Molecule executed|ok=|changed=|failed=' \
-        "$molecule_log" | while IFS= read -r line; do
-        echo "# $line"
-    done
-    echo "# --- End molecule output ---"
-
-    if [[ $molecule_rc -ne 0 ]]; then
-        echo "# ERROR: molecule failed (exit code $molecule_rc). Full log: $molecule_log"
-        false
-    fi
+        >&3 2>&1
 
     # --- Verify av-scanner is ready on both VMs ---
     for vm_ip in "$E2E_VM1_IP" "$E2E_VM2_IP"; do
@@ -274,7 +206,7 @@ setup() {
 }
 
 # ============================================
-# Auth tests
+# Auth tests (via Istio gateway)
 # ============================================
 
 @test "allowed service account can access protected endpoint" {
@@ -326,4 +258,20 @@ setup() {
             echo "ERROR: expected 200 for ${endpoint}, got $status_code"; false
         }
     done
+}
+
+# ============================================
+# API test playbook (controller → VMs directly)
+# ============================================
+
+@test "test-api playbook: controller token denied, av-scanner token allowed" {
+    local controller_pod
+    controller_pod=$(_kubectl -n av-scanner get pod \
+        -l app.kubernetes.io/name=av-scanner-controller \
+        -o jsonpath='{.items[0].metadata.name}')
+
+    run _kubectl -n av-scanner exec "$controller_pod" -- \
+        ansible-playbook playbooks/test-api.yaml -i /etc/ansible/hosts
+    echo "$output"
+    [[ $status -eq 0 ]]
 }

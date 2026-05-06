@@ -19,7 +19,7 @@
         mode: "0600"
 
 - name: Refresh SA token on VMs
-  hosts: all
+  hosts: av_scanner
   serial: 1
   become: true
   gather_facts: false

@@ -2,8 +2,9 @@
 # Suite-level setup/teardown for all e2e BATS files.
 #
 # Runs once before any test file and once after all test files complete.
-# Handles shared infra: VMs (snapshot restore), kind cluster, Istio,
-# deployer image, kube-federated-auth.
+# Handles VM snapshot management and e2e values file generation.
+#
+# Prerequisites: make env (VMs, minikube, Istio, kfa, SSH secret, skaffold-values.yaml)
 
 setup_suite() {
     local project_root
@@ -49,106 +50,45 @@ setup_suite() {
         virsh_wait_ssh "$vm_ip" "$ssh_key"
     done
 
-    # --- Kind cluster ---
-    export KIND_CLUSTER="av-scanner-e2e"
-    export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
+    # --- Generate .e2e-values.yaml for skaffold e2e profile ---
+    local vm1_ip vm2_ip vm_gateway
+    vm1_ip=$(virsh_get_ip "e2e-1")
+    vm2_ip=$(virsh_get_ip "e2e-2")
+    vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
+    local kfa_endpoint="http://${vm_gateway}:30082"
 
-    if ! kind get clusters | grep -q "^${KIND_CLUSTER}$"; then
-        echo "# Creating kind cluster ${KIND_CLUSTER}..."
-        kind create cluster --name "$KIND_CLUSTER" \
-            --config "${project_root}/test/kind-config.yaml" \
-            --wait 60s
-    fi
-    kind export kubeconfig --name "$KIND_CLUSTER"
+    cat > "${project_root}/.e2e-values.yaml" <<VALEOF
+inventory: |
+  all:
+    vars:
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      ansible_ssh_private_key_file: /ssh/id_ed25519
+      auth_enabled: "true"
+      k8s_api_endpoint: "${kfa_endpoint}"
+      auth_allowlist_content: |
+        allowlist:
+          - test-client/scanner-client
+          - av-scanner/av-scanner
+    children:
+      av_scanner:
+        hosts:
+          vm1:
+            ansible_host: ${vm1_ip}
+            ansible_user: ubuntu
+          vm2:
+            ansible_host: ${vm2_ip}
+            ansible_user: ubuntu
 
-    # --- Istio ingress gateway ---
-    if ! kubectl --context "$KUBE_CONTEXT" get namespace istio-system &>/dev/null; then
-        echo "# Installing Istio..."
-        local istioctl_bin
-        istioctl_bin=$(command -v istioctl || echo "/tmp/istioctl")
-        if [[ ! -x "$istioctl_bin" ]]; then
-            echo "# ERROR: istioctl not found"
-            return 1
-        fi
-        "$istioctl_bin" install --context "$KUBE_CONTEXT" --set profile=default \
-            --set values.gateways.istio-ingressgateway.type=NodePort -y
-    fi
-    local http_port_idx
-    http_port_idx="$(
-        kubectl --context "$KUBE_CONTEXT" -n istio-system get svc istio-ingressgateway -o json \
-          | jq '.spec.ports | map(.port) | index(80)'
-    )"
-    if [[ "$http_port_idx" == "null" || -z "$http_port_idx" ]]; then
-        echo "# ERROR: HTTP port 80 not found on istio-ingressgateway"
-        return 1
-    fi
-    kubectl --context "$KUBE_CONTEXT" -n istio-system patch svc istio-ingressgateway --type='json' \
-        -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/${http_port_idx}/nodePort\",\"value\":30080}]"
-    kubectl --context "$KUBE_CONTEXT" -n istio-system rollout status deployment/istio-ingressgateway --timeout=60s
-
-    # --- Istio Gateway ---
-    echo "# Reconciling Istio Gateway in istio-system..."
-    kubectl --context "$KUBE_CONTEXT" apply -f - <<'GWEOF'
-apiVersion: networking.istio.io/v1beta1
-kind: Gateway
-metadata:
-  name: av-scanner
-  namespace: istio-system
-spec:
-  selector:
-    istio: ingressgateway
-  servers:
-  - port:
-      number: 80
-      name: http
-      protocol: HTTP
-    hosts:
-    - "*.corp.localhost"
-GWEOF
-
-    # --- Route from kind node to virbr0 ---
-    local virbr0_subnet
-    virbr0_subnet=$(ip -4 route show dev virbr0 proto kernel | awk '{print $1}')
-    if [[ -n "$virbr0_subnet" ]]; then
-        local kind_node="${KIND_CLUSTER}-control-plane"
-        local host_gateway
-        host_gateway=$(docker exec "$kind_node" ip route | awk '/default/{print $3}')
-        if [[ -n "$host_gateway" ]]; then
-            echo "# Adding route: ${virbr0_subnet} via ${host_gateway} in kind node"
-            docker exec "$kind_node" ip route show "$virbr0_subnet" | grep -q "via $host_gateway" \
-                || docker exec "$kind_node" ip route add "$virbr0_subnet" via "$host_gateway"
-            docker exec "$kind_node" iptables -t nat -C POSTROUTING -d "$virbr0_subnet" -j MASQUERADE 2>/dev/null \
-                || docker exec "$kind_node" iptables -t nat -A POSTROUTING -d "$virbr0_subnet" -j MASQUERADE
-        fi
-    fi
-
-    # --- Build and load deployer image ---
-    local deploy_image="av-scanner-deploy:e2e"
-    echo "# Pruning dangling Docker images..."
-    docker image prune -f || true
-    echo "# Building deployer image..."
-    docker build -f "${project_root}/docker/Dockerfile" \
-        -t "$deploy_image" "$project_root"
-    kind load docker-image "$deploy_image" --name "$KIND_CLUSTER"
-
-    # --- kube-federated-auth ---
-    local kfa_image="ghcr.io/rophy/kube-federated-auth:3.4.2"
-    if ! docker image inspect "$kfa_image" >/dev/null; then
-        local kfa_dir="${project_root}/../kube-federated-auth"
-        if [[ -d "$kfa_dir" ]]; then
-            echo "# Building ${kfa_image} from local source..."
-            docker build -t "$kfa_image" "$kfa_dir"
-        else
-            echo "# Pulling ${kfa_image}..."
-            docker pull "$kfa_image"
-        fi
-    fi
-    kind load docker-image "$kfa_image" --name "$KIND_CLUSTER"
-
-    echo "# Deploying kube-federated-auth..."
-    kubectl --context "$KUBE_CONTEXT" apply -f "${project_root}/test/kube-federated-auth.yaml"
-    kubectl --context "$KUBE_CONTEXT" rollout status deployment/kube-federated-auth \
-        -n kube-federated-auth --timeout=120s
+istio:
+  enabled: true
+  gatewayRef: istio-system/av-scanner
+  virtualServiceHost: av-scanner.corp.localhost
+  serviceEntryHost: av-scanner.internal
+  endpoints:
+    - address: ${vm1_ip}
+    - address: ${vm2_ip}
+VALEOF
+    echo "# Generated .e2e-values.yaml (kfa_endpoint=${kfa_endpoint})"
 
     echo "# Suite setup complete."
 }
@@ -156,8 +96,8 @@ GWEOF
 teardown_suite() {
     if [[ "${E2E_CLEAN_ALL:-0}" == "1" ]]; then
         echo "# Tearing down suite..."
-        helm uninstall av-scanner --kube-context "kind-av-scanner-e2e" -n av-scanner || true
-        kind delete cluster --name av-scanner-e2e || true
+        helm uninstall av-scanner --kube-context "av-scanner" -n av-scanner || true
+        minikube delete --profile av-scanner || true
 
         local project_root
         project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -16,6 +16,7 @@ cronjob:
 
 controller:
   enabled: true
+  extraEnv: []
 
 token:
   duration: 168h
@@ -31,13 +32,15 @@ inventory: |
     vars:
       ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
       ansible_ssh_private_key_file: /ssh/id_ed25519
-    hosts:
-      vm1:
-        ansible_host: 192.168.64.2
-        ansible_user: ubuntu
-      vm2:
-        ansible_host: 192.168.64.3
-        ansible_user: ubuntu
+    children:
+      av_scanner:
+        hosts:
+          vm1:
+            ansible_host: 192.168.64.2
+            ansible_user: ubuntu
+          vm2:
+            ansible_host: 192.168.64.3
+            ansible_user: ubuntu
 
 # Pre-install hook that validates SSH connectivity to all inventory hosts
 # by running "ansible all -m ping" before deploying workloads.

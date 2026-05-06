@@ -1,6 +1,6 @@
 ---
 - name: Check token state on targets
-  hosts: all
+  hosts: av_scanner
   become: true
   gather_facts: false
   tasks:
@@ -20,7 +20,7 @@
   tasks:
     - name: Determine if any target needs a token
       set_fact:
-        any_missing_token: "{{ groups['all'] | map('extract', hostvars, 'token_stat') | selectattr('stat.exists', 'false') | list | length > 0 }}"
+        any_missing_token: "{{ groups['av_scanner'] | map('extract', hostvars, 'token_stat') | selectattr('stat.exists', 'false') | list | length > 0 }}"
 
     - name: Mint SA token to file
       shell: >
@@ -32,7 +32,7 @@
       when: any_missing_token
 
 - name: Deploy AV Scanner to VM
-  hosts: all
+  hosts: av_scanner
   serial: "{{ deploy_serial | default('100%') }}"
   become: true
   gather_facts: true

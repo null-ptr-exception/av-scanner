@@ -2,13 +2,10 @@
 # Tests for Helm hook deployments (post-install, post-upgrade).
 #
 # Verifies that hooks actually deploy av-scanner to VMs, not just
-# that Jobs complete. Cleans VM state before install to ensure
-# hooks are the sole deployment mechanism.
+# that Jobs complete. Reverts VMs to clean snapshot before install
+# to ensure hooks are the sole deployment mechanism.
 #
-# Requires: kind, docker, kubectl, helm, virsh
-#
-# Prerequisites:
-#   ./scripts/vm-init.sh --name e2e --count 2
+# Prerequisites: make env
 
 setup_file() {
     load 'vm_helper'
@@ -40,53 +37,16 @@ setup_file() {
     export E2E_SSH_KEY="$ssh_key"
     echo "# VMs reverted: e2e-1=${E2E_VM1_IP}, e2e-2=${E2E_VM2_IP}"
 
-    export KIND_CLUSTER="av-scanner-e2e"
-    export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
-    kind export kubeconfig --name "$KIND_CLUSTER"
+    export MINIKUBE_PROFILE="av-scanner"
+    export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
 
-    # --- Clean Helm state ---
-    helm uninstall av-scanner --kube-context "$KUBE_CONTEXT" -n av-scanner || true
-    _kubectl delete namespace av-scanner --ignore-not-found
-    _kubectl wait --for=delete namespace/av-scanner --timeout=120s 2>/dev/null || true
-    _kubectl create namespace av-scanner
+    # --- Clean slate + deploy via skaffold (hooks-only, no controller) ---
+    (cd "$project_root" && skaffold delete) >&3 2>&1 || true
 
-    # --- SSH key secret ---
-    _kubectl -n av-scanner create secret generic av-scanner-ssh-key \
-        --from-file=id_ed25519="${E2E_SSH_KEY}"
+    echo "# Deploying via skaffold (e2e-hooks profile)..." >&3
+    (cd "$project_root" && skaffold run -p e2e-hooks) >&3 2>&1
 
-    # --- Inventory ---
-    local inventory
-    inventory=$(cat <<INVEOF
-all:
-  vars:
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    ansible_ssh_private_key_file: /ssh/id_ed25519
-  hosts:
-    vm1:
-      ansible_host: ${E2E_VM1_IP}
-      ansible_user: ubuntu
-    vm2:
-      ansible_host: ${E2E_VM2_IP}
-      ansible_user: ubuntu
-INVEOF
-)
-
-    # --- Helm install (hooks do the deployment) ---
-    echo "# Installing Helm chart (hooks enabled, controller disabled)..."
-    helm upgrade --install av-scanner "${project_root}/charts/av-scanner" \
-        --kube-context "$KUBE_CONTEXT" \
-        -n av-scanner --create-namespace \
-        --set controller.enabled=false \
-        --set autoDeploy.enabled=true \
-        --set preInstallCheck.enabled=true \
-        --set image.registry="" \
-        --set image.repository=av-scanner-deploy \
-        --set image.tag=e2e \
-        --set sshKey.existingSecret=av-scanner-ssh-key \
-        --set-string "inventory=${inventory}" \
-        --wait --timeout 600s
-
-    echo "# Post-install hooks completed."
+    echo "# Post-install hooks completed." >&3
 }
 
 teardown_file() {
@@ -97,8 +57,8 @@ setup() {
     load 'test_helper'
     load 'vm_helper'
     _e2e_init
-    export KIND_CLUSTER="av-scanner-e2e"
-    export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
+    export MINIKUBE_PROFILE="av-scanner"
+    export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
     export E2E_VM1_IP="${E2E_VM1_IP:-$(virsh_get_ip e2e-1)}"
     export E2E_VM2_IP="${E2E_VM2_IP:-$(virsh_get_ip e2e-2)}"
     export E2E_SSH_KEY="${E2E_SSH_KEY:-$(get_project_root)/.vms/id_ed25519}"
@@ -163,34 +123,8 @@ setup() {
     local project_root
     project_root="$(get_project_root)"
 
-    local inventory
-    inventory=$(cat <<INVEOF
-all:
-  vars:
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-    ansible_ssh_private_key_file: /ssh/id_ed25519
-  hosts:
-    vm1:
-      ansible_host: ${E2E_VM1_IP}
-      ansible_user: ubuntu
-    vm2:
-      ansible_host: ${E2E_VM2_IP}
-      ansible_user: ubuntu
-INVEOF
-)
-
-    helm upgrade av-scanner "${project_root}/charts/av-scanner" \
-        --kube-context "$KUBE_CONTEXT" \
-        -n av-scanner \
-        --set controller.enabled=false \
-        --set autoDeploy.enabled=true \
-        --set preInstallCheck.enabled=true \
-        --set image.registry="" \
-        --set image.repository=av-scanner-deploy \
-        --set image.tag=e2e \
-        --set sshKey.existingSecret=av-scanner-ssh-key \
-        --set-string "inventory=${inventory}" \
-        --wait --timeout 600s
+    echo "# Running skaffold run -p e2e-hooks (upgrade)..." >&3
+    (cd "$project_root" && skaffold run -p e2e-hooks) >&3 2>&1
 }
 
 @test "post-upgrade: deploy Job completed successfully" {

@@ -1,6 +1,6 @@
 ---
 - name: Converge
-  hosts: all
+  hosts: av_scanner
   become: true
   gather_facts: true
   roles:

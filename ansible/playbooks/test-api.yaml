@@ -1,0 +1,130 @@
+---
+- name: Verify auth endpoints on VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sa_name: "{{ lookup('env', 'SA_NAME') | default('av-scanner', true) }}"
+    sa_namespace: "{{ lookup('env', 'SA_NAMESPACE') | default('av-scanner', true) }}"
+    controller_token_path: /var/run/secrets/kubernetes.io/serviceaccount/token
+    eicar_broken: "X5x!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+  tasks:
+    - name: Read controller SA token (should be denied)
+      slurp:
+        src: "{{ controller_token_path }}"
+      register: controller_token_raw
+
+    - name: Set controller token
+      set_fact:
+        controller_token: "{{ controller_token_raw.content | b64decode }}"
+
+    - name: Mint short-lived av-scanner token (should be allowed)
+      command: >
+        kubectl create token {{ sa_name }}
+          --namespace {{ sa_namespace }}
+          --duration 10m
+      register: allowed_token_result
+      changed_when: false
+
+    - name: Set allowed token
+      set_fact:
+        allowed_token: "{{ allowed_token_result.stdout }}"
+
+    - name: Build VM endpoint list
+      set_fact:
+        vm_endpoints: "{{ groups['av_scanner'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '^(.*)$', 'http://\\1:' + (av_scanner_port | default(3000)) | string) | list }}"
+
+    - name: "DENIED: health endpoint with controller token returns 403"
+      uri:
+        url: "{{ item }}/api/v1/health"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+        status_code: [403]
+      loop: "{{ vm_endpoints }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: "DENIED: scan clean file with controller token returns 403"
+      uri:
+        url: "{{ item }}/api/v1/scan"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+          Content-Type: "multipart/form-data; boundary=----TestBoundary"
+        body: "------TestBoundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"clean.txt\"\r\nContent-Type: text/plain\r\n\r\nclean content\r\n------TestBoundary--\r\n"
+        status_code: [403]
+      loop: "{{ vm_endpoints }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: "ALLOWED: health endpoint with av-scanner token returns 200"
+      uri:
+        url: "{{ item }}/api/v1/health"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ allowed_token }}"
+        status_code: [200]
+      loop: "{{ vm_endpoints }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: "ALLOWED: scan clean file returns 200 with status clean"
+      uri:
+        url: "{{ item }}/api/v1/scan"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ allowed_token }}"
+        body_format: form-multipart
+        body:
+          file:
+            content: "clean test content"
+            filename: clean.txt
+            mime_type: text/plain
+        return_content: true
+        status_code: [200]
+      register: clean_results
+      loop: "{{ vm_endpoints }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Verify clean scan result
+      assert:
+        that:
+          - item.json.status == "clean"
+        fail_msg: "Expected status 'clean', got '{{ item.json.status }}'"
+      loop: "{{ clean_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ALLOWED: scan EICAR file returns 200 with status infected"
+      uri:
+        url: "{{ item }}/api/v1/scan"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ allowed_token }}"
+        body_format: form-multipart
+        body:
+          file:
+            content: "{{ eicar_broken | replace('x', 'O') }}"
+            filename: eicar.com
+            mime_type: application/octet-stream
+        return_content: true
+        status_code: [200]
+      register: eicar_results
+      loop: "{{ vm_endpoints }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Verify EICAR scan result
+      assert:
+        that:
+          - item.json.status == "infected"
+        fail_msg: "Expected status 'infected', got '{{ item.json.status }}'"
+      loop: "{{ eicar_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Auth verification passed
+      debug:
+        msg: "All VMs passed auth verification: denied with controller token, allowed with av-scanner token"

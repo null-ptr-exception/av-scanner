@@ -4,3 +4,8 @@ venv/
 
 # VM artifacts (libvirt disk images, cloud-init, SSH keys)
 .vms/
+
+# Skaffold dev values (developer-specific VM IPs, inventory)
+skaffold-values.yaml
+.e2e-values.yaml
+test-results/

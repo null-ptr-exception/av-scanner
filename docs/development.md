@@ -3,62 +3,42 @@
 ## Quick start
 
 ```bash
-# Create a VM
-make vm-init
-
-# Build binary and deploy to VM
-make deploy
+make env      # Create VMs + minikube cluster + kubectl context + skaffold-values.yaml
+make deploy   # Build deployer image and deploy via Helm
 ```
 
-`make deploy` cross-compiles the Go binary for linux/amd64, then runs the Ansible deploy playbook which installs ClamAV, copies the binary, creates a systemd service, and waits for the health check.
+`make env` creates two VMs via libvirt, a minikube cluster (profile `av-scanner`, K8s 1.24), the SSH key secret, and generates `skaffold-values.yaml` with VM IPs. Idempotent — safe to run repeatedly.
 
-## VM management
+`make deploy` runs `skaffold run` which builds the deployer image and deploys via the Helm chart.
 
-VMs are managed via libvirt/virsh. Each VM gets a real IP on the default NAT network (`virbr0`). No state files — virsh is the source of truth.
+For a live-reload dev loop, use `skaffold dev` instead — it watches for changes, rebuilds, and redeploys automatically.
+
+## Testing
 
 ```bash
-# Create 1 VM (default name: av-scanner)
-./scripts/vm-init.sh
-
-# Create multiple VMs with a prefix
-./scripts/vm-init.sh --name molecule --count 2
-
-# Force-recreate
-./scripts/vm-init.sh --name av-scanner --force
+make test-unit      # Go unit tests
+make test-helm      # Helm lint + unittest
+make test-molecule  # Molecule tests inside controller pod (requires: make deploy)
+make test-e2e       # BATS e2e tests (requires: make env)
+make test-perf      # k6 load tests
 ```
 
-Prerequisites: `virsh`, `virt-install`, `qemu-img`, `cloud-localds`
+| Test | What it covers |
+|------|----------------|
+| Unit | Go packages (server, scanner, auth) |
+| Helm | Chart rendering, values, RBAC, hooks |
+| Molecule | Ansible roles against real VMs (converge, idempotence, verify) |
+| E2E | Full pipeline: skaffold build+deploy → molecule → scan/auth via Istio gateway |
+| Performance | Load test: 80% clean / 20% EICAR, verifies 100% correct results |
 
-## Building
-
-### Go binary
+### Running molecule interactively
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o av-scanner main.go
+kubectl -n av-scanner exec -it deploy/av-scanner-controller -- \
+    bash -c "cd /app/ansible/roles/av-scanner && molecule test"
 ```
 
-### Container images
-
-This project uses **podman** for container builds:
-
-```bash
-# Scanner binary image
-make build
-
-# Deployer image (binary + Ansible + kubectl)
-make build-deploy
-```
-
-The deployer image (`docker/Dockerfile`) bundles the Go binary, Ansible, kubectl, and node_exporter. It is used by the Helm chart's controller Deployment, CronJob, and hooks.
-
-Dockerfile must use fully qualified image names (e.g., `docker.io/library/golang:1.23-alpine`).
-
-### Helm chart
-
-```bash
-helm lint charts/av-scanner --set sshKey.existingSecret=test
-helm package charts/av-scanner
-```
+VM IPs and SSH key are available in the pod via env vars (`AV_SCANNER_VM1_IP`, `AV_SCANNER_VM2_IP`) and volume mount (`/ssh/id_ed25519`).
 
 ## Project structure
 
@@ -66,7 +46,7 @@ helm package charts/av-scanner
 ├── main.go                      # Go entrypoint
 ├── internal/                    # Go packages (server, scanner, auth)
 ├── ansible/
-│   ├── playbooks/               # deploy.yaml, token-refresh.yaml, restart.yaml
+│   ├── playbooks/               # deploy.yaml, token-refresh.yaml, restart.yaml, test-api.yaml
 │   └── roles/
 │       ├── av-scanner/          # Installs binary, systemd service, config
 │       └── clamav/              # Installs and configures ClamAV
@@ -74,76 +54,61 @@ helm package charts/av-scanner
 │   ├── templates/               # K8s manifests (controller, cronjob, hooks)
 │   └── tests/                   # helm-unittest test files
 ├── docker/Dockerfile            # Deployer image
+├── skaffold.yaml                # Skaffold config (build + deploy)
 ├── scripts/                     # VM init, destroy, perf-test
 └── test/
     ├── e2e/                     # BATS end-to-end tests
     └── perf/                    # k6 load test scripts
 ```
 
-## Testing
+## Inventory
 
-| Test | Command | Prerequisites |
-|------|---------|---------------|
-| Unit | `make test-unit` | None |
-| Helm | `make test-helm` | `helm`, `helm-unittest` plugin |
-| Molecule | `make test-molecule` | VMs: `vm-init --name molecule --count 2` |
-| E2E | `make test-e2e` | VMs: `vm-init --name e2e --count 2`, `kind`, `docker`, `bats` |
-| Performance | `make test-perf` | VM with av-scanner deployed, `k6` |
+The Ansible inventory uses an `av_scanner` group for VM hosts:
 
-### Unit tests
-
-```bash
-go test -race ./...
+```yaml
+all:
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    ansible_ssh_private_key_file: /ssh/id_ed25519
+  children:
+    av_scanner:
+      hosts:
+        vm1:
+          ansible_host: 192.168.122.213
+          ansible_user: ubuntu
 ```
 
-### Helm tests
+All playbooks target `hosts: av_scanner` (not `hosts: all`) to avoid conflicts with localhost plays. The inventory is set via Helm values and mounted as a ConfigMap at `/etc/ansible/hosts` in all pods.
+
+`make env` generates `skaffold-values.yaml` (gitignored) with the inventory populated from actual VM IPs.
+
+## VM management
+
+VMs are managed via libvirt/virsh. Each VM gets a real IP on the default NAT network (`virbr0`). No state files — virsh is the source of truth.
 
 ```bash
-helm lint charts/av-scanner --set sshKey.existingSecret=test
-helm unittest charts/av-scanner
+# Create/destroy via make
+make env    # creates e2e-1, e2e-2
+make clean  # destroys VMs + minikube
+
+# Direct script usage
+./scripts/vm-init.sh --name e2e --count 2 --force
+./scripts/vm-destroy.sh --name e2e --count 2
 ```
 
-### Molecule tests
+Prerequisites: `virsh`, `virt-install`, `qemu-img`, `cloud-localds`
 
-Tests the Ansible roles against real VMs:
+## Building
+
+The deployer image (`docker/Dockerfile`) bundles the Go binary, Ansible, kubectl, molecule, and node_exporter. It is used by the Helm chart's controller Deployment, CronJob, and hooks.
+
+`make deploy` (via skaffold) handles the build automatically. To build manually:
 
 ```bash
-cd ansible/roles/av-scanner
-MOLECULE_SSH_KEY=../../.vms/id_ed25519 \
-MOLECULE_VM1_IP=<ip1> \
-MOLECULE_VM2_IP=<ip2> \
-molecule test
+docker build -f docker/Dockerfile -t av-scanner-deploy:dev .
 ```
 
-### E2E tests
-
-Uses [BATS](https://github.com/bats-core/bats-core) with a kind cluster + libvirt VMs. Tests the full deployment path: Helm install → controller pod → Ansible deploy → scan/auth verification.
-
-```bash
-# Create e2e VMs
-./scripts/vm-init.sh --name e2e --count 2
-
-# Run all e2e tests
-make test-e2e
-
-# Run individually
-bats test/e2e/01_e2e.bats
-
-# Clean up
-kind delete cluster --name av-scanner-e2e
-```
-
-### Performance tests
-
-```bash
-# Default: 10 VUs for 30 seconds
-make test-perf
-
-# Custom load
-k6 run -e API_URL=http://<VM_IP>:3000 test/perf/loadtest.js
-```
-
-Sends 80% clean / 20% infected (EICAR) files and verifies 100% correct scan results. If Prometheus is running, reports VM resource usage metrics after the test.
+Dockerfile must use fully qualified image names (e.g., `docker.io/library/golang:1.23-alpine`).
 
 ## Releasing
 
@@ -170,21 +135,3 @@ Sends 80% clean / 20% infected (EICAR) files and verifies 100% correct scan resu
 - **Chart version**: any change to Helm templates, values.yaml, or chart metadata
 
 If only docs or CI scripts change, no version bump is needed.
-
-## Makefile targets
-
-| Target | Description |
-|--------|-------------|
-| `make vm-init` | Create VM via libvirt/virsh |
-| `make vm-start` | Start existing VM |
-| `make vm-stop` | Graceful shutdown |
-| `make vm-destroy` | Destroy VM and remove disk |
-| `make build` | Build scanner image |
-| `make build-deploy` | Build deployer image |
-| `make deploy` | Build binary and deploy to VM |
-| `make test-unit` | Run Go unit tests |
-| `make test-helm` | Helm lint + unittest |
-| `make test-molecule` | Molecule tests |
-| `make test-e2e` | BATS e2e tests |
-| `make test-perf` | k6 load tests |
-| `make clean` | Remove local images |
