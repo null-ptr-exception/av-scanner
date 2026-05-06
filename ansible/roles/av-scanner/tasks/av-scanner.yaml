@@ -1,3 +1,18 @@
+- name: Get desired av-scanner version
+  command: "{{ binary_path }} --version"
+  delegate_to: localhost
+  become: false
+  register: desired_version
+  changed_when: false
+  when: binary_path is defined
+
+- name: Get installed av-scanner version
+  command: /usr/local/bin/av-scanner --version
+  register: installed_version
+  changed_when: false
+  failed_when: false
+  when: binary_path is defined
+
 - name: Copy av-scanner binary to VM
   copy:
     src: "{{ binary_path }}"
@@ -5,7 +20,7 @@
     mode: "0755"
     owner: root
     group: root
-  when: binary_path is defined
+  when: binary_path is defined and (installed_version.stdout | default('') != desired_version.stdout | default(''))
   notify: Restart av-scanner
 
 - name: Create av-scanner config directory

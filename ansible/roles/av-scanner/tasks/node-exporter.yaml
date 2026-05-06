@@ -5,6 +5,21 @@
     shell: /usr/sbin/nologin
     create_home: false
 
+- name: Get desired node_exporter version
+  command: "{{ node_exporter_path }} --version"
+  delegate_to: localhost
+  become: false
+  register: desired_ne_version
+  changed_when: false
+  when: node_exporter_path is defined and node_exporter_path | length > 0
+
+- name: Get installed node_exporter version
+  command: /usr/local/bin/node_exporter --version
+  register: installed_ne_version
+  changed_when: false
+  failed_when: false
+  when: node_exporter_path is defined and node_exporter_path | length > 0
+
 - name: Copy node_exporter binary to VM
   copy:
     src: "{{ node_exporter_path }}"
@@ -12,7 +27,7 @@
     mode: "0755"
     owner: root
     group: root
-  when: node_exporter_path is defined and node_exporter_path | length > 0
+  when: node_exporter_path is defined and node_exporter_path | length > 0 and (installed_ne_version.stdout | default('') != desired_ne_version.stdout | default(''))
   notify: Restart node_exporter
 
 - name: Create node_exporter systemd service

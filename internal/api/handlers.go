@@ -262,9 +262,7 @@ func (a *API) handleLive(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleVersion(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, map[string]interface{}{
-		"version":   version.Version,
-		"commit":    version.Commit,
-		"buildTime": version.BuildTime,
+		"version": version.Version,
 	}, http.StatusOK)
 }
 

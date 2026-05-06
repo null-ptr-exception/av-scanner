@@ -1,7 +1,3 @@
 package version
 
-var (
-	Version   = "dev"
-	Commit    = "unknown"
-	BuildTime = "unknown"
-)
+const Version = "1.0.0"
