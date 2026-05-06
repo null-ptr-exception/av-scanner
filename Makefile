@@ -114,7 +114,7 @@ env: ## Create VMs + minikube + Istio + kfa (full dev environment)
 	echo "  e2e-2: $$VM2_IP"
 
 deploy: ## Build deployer image and deploy via Helm (skaffold run)
-	skaffold run
+	skaffold run --kube-context $(MINIKUBE_PROFILE)
 
 clean: ## Delete minikube cluster and VMs
 	minikube delete --profile $(MINIKUBE_PROFILE) || true
