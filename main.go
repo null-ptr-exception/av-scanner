@@ -18,7 +18,7 @@ import (
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Printf("av-scanner %s (commit: %s, built: %s)\n", version.Version, version.Commit, version.BuildTime)
+		fmt.Printf("av-scanner %s\n", version.Version)
 		os.Exit(0)
 	}
 	// Setup logger

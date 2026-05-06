@@ -45,7 +45,4 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
           tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
