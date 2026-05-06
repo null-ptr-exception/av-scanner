@@ -63,6 +63,13 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           fi
 
+      - name: Install Skaffold
+        run: |
+          if ! command -v skaffold &>/dev/null; then
+            curl -Lo /tmp/skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+            chmod +x /tmp/skaffold && sudo mv /tmp/skaffold /usr/local/bin/skaffold
+          fi
+
       - name: Install istioctl
         run: |
           if ! command -v istioctl &>/dev/null; then
@@ -75,14 +82,11 @@ jobs:
             sudo install -m 0755 /tmp/istioctl /usr/local/bin/istioctl
           fi
 
-      - name: Create e2e VMs
-        run: VM_MEMORY=2048 ./scripts/vm-init.sh --name e2e --count 2 --force
+      - name: Setup environment
+        run: make env
 
       - name: Run e2e tests
-        run: |
-          mkdir -p test-results
-          bats --formatter tap --report-formatter junit --output test-results \
-            --print-output-on-failure --show-output-of-passing-tests --verbose-run -x test/e2e/
+        run: make test-e2e
 
       - name: Test Report
         uses: dorny/test-reporter@v1
