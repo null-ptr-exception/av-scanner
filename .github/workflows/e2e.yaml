@@ -35,7 +35,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          if ! command -v bats &>/dev/null || ! command -v cloud-localds &>/dev/null || ! command -v virt-install &>/dev/null; then
+          if ! command -v make &>/dev/null || ! command -v bats &>/dev/null || ! command -v cloud-localds &>/dev/null || ! command -v virt-install &>/dev/null; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends \
               make bats cloud-image-utils virtinst libvirt-daemon-system qemu-utils
           fi
