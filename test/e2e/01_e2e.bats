@@ -21,7 +21,7 @@ setup_file() {
     # --- kube-federated-auth endpoint as seen from the VMs ---
     local vm_gateway
     vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
-    local kfa_endpoint="http://${vm_gateway}:30082"
+    local kfa_endpoint="http://${vm_gateway}:${KFA_PORT:-31082}"
 
     # --- Deploy via skaffold ---
     (cd "$project_root" && skaffold delete --kube-context "$KUBE_CONTEXT") >&3 2>&1 || true
@@ -89,7 +89,7 @@ setup_file() {
     done
 
     # --- Verify Istio gateway is routing ---
-    export API_URL="http://av-scanner.corp.localhost:30080"
+    export API_URL="http://av-scanner.corp.localhost:${GATEWAY_PORT:-31080}"
     echo "# Waiting for Istio gateway at ${API_URL}..."
     for i in $(seq 1 15); do
         if curl -4 -sf --connect-timeout 2 "${API_URL}/api/v1/live" >/dev/null; then

@@ -9,6 +9,8 @@ make deploy   # Build deployer image and deploy via Helm
 
 `make env` creates two VMs via libvirt, a minikube cluster (profile `av-scanner`, K8s 1.24), the SSH key secret, and generates `skaffold-values.yaml` with VM IPs. Idempotent — safe to run repeatedly.
 
+Minikube NodePorts are mapped to host ports `GATEWAY_PORT` (Istio gateway, default 31080), `KFA_PORT` (kube-federated-auth, default 31082), and `PROM_PORT` (Prometheus, default 31090). Override them if they clash with other services, e.g. `make env test-e2e GATEWAY_PORT=32080`. The port mapping is fixed when the minikube profile is created, so changing it requires `minikube delete --profile av-scanner` first.
+
 `make deploy` runs `skaffold run` which builds the deployer image and deploys via the Helm chart.
 
 For a live-reload dev loop, use `skaffold dev` instead — it watches for changes, rebuilds, and redeploys automatically.

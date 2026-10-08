@@ -55,7 +55,7 @@ setup_suite() {
     vm1_ip=$(virsh_get_ip "e2e-1")
     vm2_ip=$(virsh_get_ip "e2e-2")
     vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
-    local kfa_endpoint="http://${vm_gateway}:30082"
+    local kfa_endpoint="http://${vm_gateway}:${KFA_PORT:-31082}"
 
     cat > "${project_root}/.e2e-values.yaml" <<VALEOF
 inventory: |
