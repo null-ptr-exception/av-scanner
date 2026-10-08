@@ -8,6 +8,9 @@ KFA_PORT ?= 31082
 PROM_PORT ?= 31090
 export GATEWAY_PORT KFA_PORT PROM_PORT
 
+# Extra minikube start flags (e.g. --container-runtime=containerd for rootless Docker)
+MINIKUBE_START_ARGS ?=
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | awk -F '\t' '{printf "  %-16s %s\n", $$1, $$2}'
 
@@ -30,7 +33,7 @@ env: ## Create VMs + minikube + Istio + kfa (full dev environment)
 			--kubernetes-version=v1.24.17 \
 			--ports=$(GATEWAY_PORT):30080,$(KFA_PORT):30082,$(PROM_PORT):30090 \
 			--wait=apiserver \
-			--force; \
+			--force $(MINIKUBE_START_ARGS); \
 	fi
 	kubectl config use-context $(MINIKUBE_PROFILE)
 	@kubectl --context $(MINIKUBE_PROFILE) create namespace av-scanner 2>/dev/null || true

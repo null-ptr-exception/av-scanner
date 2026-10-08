@@ -83,11 +83,18 @@ jobs:
               https://github.com/istio/istio/releases/download/1.16.7/istioctl-1.16.7-linux-amd64.tar.gz.sha256
             echo "$(cat /tmp/istioctl.tar.gz.sha256)  /tmp/istioctl.tar.gz" | sha256sum -c -
             tar -xzf /tmp/istioctl.tar.gz -C /tmp istioctl
-            sudo install -m 0755 /tmp/istioctl /usr/local/bin/istioctl
+            mkdir -p "$HOME/.local/bin"
+            install -m 0755 /tmp/istioctl "$HOME/.local/bin/istioctl"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           fi
+
+      - name: Configure minikube for rootless Docker
+        run: minikube config set rootless true
 
       - name: Setup environment
         run: make env
+        env:
+          MINIKUBE_START_ARGS: --container-runtime=containerd
 
       - name: Run e2e tests
         run: make test-e2e
