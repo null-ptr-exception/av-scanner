@@ -69,10 +69,6 @@ func (l *Limiter) Acquire(account string) (release func(), rej *Rejection) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.cfg == nil {
-		return func() {}, nil
-	}
-
 	now := l.now()
 	st, ok := l.accounts[account]
 	if !ok {
@@ -80,7 +76,13 @@ func (l *Limiter) Acquire(account string) (release func(), rej *Rejection) {
 		l.applyRate(account, st, now)
 		l.accounts[account] = st
 	}
-	limits := l.cfg.For(account)
+
+	// In-flight scans are counted even with no limits configured, so limits
+	// enabled by a later reload see scans that are already running
+	var limits Limits
+	if l.cfg != nil {
+		limits = l.cfg.For(account)
+	}
 
 	if limits.MaxConcurrent > 0 && st.inflight >= limits.MaxConcurrent {
 		metrics.RecordRateLimitRejected(account, ReasonConcurrency)

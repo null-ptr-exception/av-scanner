@@ -210,3 +210,15 @@ func TestLimiter_RemovedAccountDroppedAfterLastRelease(t *testing.T) {
 	l.Update(cfg, allowedSet("ns/sa"))
 	mustAcquire(t, l, "ns/sa")() // fresh bucket
 }
+
+func TestLimiter_NilConfigStillTracksInflight(t *testing.T) {
+	l, _ := newTestLimiter(nil, "ns/sa")
+
+	release := mustAcquire(t, l, "ns/sa") // running before limits exist
+
+	l.Update(&Config{Default: Limits{MaxConcurrent: 1}}, allowedSet("ns/sa"))
+	mustReject(t, l, "ns/sa", ReasonConcurrency)
+
+	release()
+	mustAcquire(t, l, "ns/sa")
+}
