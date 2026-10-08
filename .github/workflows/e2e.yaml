@@ -28,7 +28,7 @@ jobs:
         run: go test ./...
 
   e2e:
-    runs-on: [self-hosted, nuc-rophy]
+    runs-on: [self-hosted, kata-rophy]
     needs: unit
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
