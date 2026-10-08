@@ -106,7 +106,7 @@ New metrics:
 | `av_ratelimit_rejected_total` | counter | `account`, `reason` | Rejected requests |
 | `av_ratelimit_inflight_scans` | gauge | `account` | Current in-flight scans |
 
-`account` label cardinality is bounded by the allowlist. Rejected requests also appear in the existing `av_http_requests_total` with `status="429"`.
+`account` label cardinality is bounded by the allowlist. Rejected requests also appear in the existing `av_http_requests_total` with `status_code="429"`.
 
 Each rejection logs at `Warn` with `identity`, `reason`, `limit`, `path`, matching the auth-failure log style.
 
@@ -134,8 +134,9 @@ E2E (`make test-e2e`):
 
 - Add a dedicated test ServiceAccount with a low rate override (e.g. `requestsPerMinute: 2, burst: 1`) to the e2e allowlist in `test/e2e/setup_suite.bash`.
 - Send requests to one VM IP directly, bypassing the gateway: each VM has its own limits, so load-balanced results would not be deterministic.
-- Assert the 429 status, `reason: rate`, the `Retry-After` header, and `av_ratelimit_rejected_total`.
-- Concurrency is covered by unit tests only. Concurrent requests against a real deployment currently trip issue #15 (concurrent requests fail with 401). Add a concurrency e2e test after #15 is fixed.
+- Rate: a dedicated ServiceAccount with `requestsPerMinute: 1, burst: 1`. Two sequential scans → the second gets 429 with `reason: rate` and a `Retry-After` header, and `av_ratelimit_rejected_total` increments.
+- Concurrency: a dedicated ServiceAccount with `maxConcurrent: 1`. A slow upload (`curl --limit-rate`) holds the slot, because the slot is acquired before the body is read. A second scan sent while it is in flight → 429 with `reason: concurrency`. The slow request then completes with 200.
+- Issue #15 (concurrent requests reported to fail with 401) is not assumed. If the concurrency case gets 401 instead of 429, investigate it as a reproduction of #15.
 
 Helm (`make test-helm`) and Molecule (`make test-molecule`): no template changes; must keep passing.
 
@@ -145,6 +146,7 @@ Helm (`make test-helm`) and Molecule (`make test-molecule`): no template changes
 - `internal/auth/allowlist.go`: parse `rateLimits` and pass it to the limiter on load/reload
 - `internal/api/handlers.go`: wire the middleware after auth
 - `internal/metrics/`: new metrics
-- `go.mod` / `go.sum`: add `golang.org/x/time`
+- `go.mod` / `go.sum`: add `golang.org/x/time` v0.12.0 (last release compatible with `go 1.23.0`)
+- `internal/api/handlers_test.go`: wiring test
 - `test/e2e/setup_suite.bash`, `test/e2e/01_e2e.bats`: e2e case
 - `docs/api.md`: 429 response, `rateLimits` config
