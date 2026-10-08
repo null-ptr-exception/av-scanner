@@ -406,4 +406,8 @@ rateLimits:
 	if !strings.Contains(mr.Body.String(), want) {
 		t.Errorf("metrics missing %s", want)
 	}
+	wantHTTP := `av_http_requests_total{endpoint="/api/v1/scan",method="POST",status_code="429"}`
+	if !strings.Contains(mr.Body.String(), wantHTTP) {
+		t.Errorf("metrics missing %s", wantHTTP)
+	}
 }

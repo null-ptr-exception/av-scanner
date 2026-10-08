@@ -110,7 +110,7 @@ rateLimits:
 - Overrides merge field-by-field over `default`.
 - `burst` must be > 0 when `requestsPerMinute` is set.
 - Limits are enforced per av-scanner instance. Behind a load balancer with N VMs, an account can reach up to N× the configured limit.
-- Changes are hot-reloaded. An invalid file is rejected and the previous config stays active.
+- Edits to the file on the VM are hot-reloaded: an invalid file is rejected and the previous config stays active. Changes deployed via Ansible (`auth_allowlist_content`) restart the service, which resets limiter state.
 
 Rejected requests get `429` with a `Retry-After` header (seconds):
 

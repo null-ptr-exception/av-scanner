@@ -132,7 +132,7 @@ Unit (`make test-unit`):
 
 E2E (`make test-e2e`):
 
-- Add a dedicated test ServiceAccount with a low rate override (e.g. `requestsPerMinute: 2, burst: 1`) to the e2e allowlist in `test/e2e/setup_suite.bash`.
+- Add a dedicated test ServiceAccount with a low rate override (e.g. `requestsPerMinute: 1, burst: 1`) to the e2e allowlist in `test/e2e/setup_suite.bash`.
 - Send requests to one VM IP directly, bypassing the gateway: each VM has its own limits, so load-balanced results would not be deterministic.
 - Rate: a dedicated ServiceAccount with `requestsPerMinute: 1, burst: 1`. Two sequential scans → the second gets 429 with `reason: rate` and a `Retry-After` header, and `av_ratelimit_rejected_total` increments.
 - Concurrency: a dedicated ServiceAccount with `maxConcurrent: 1`. A slow upload (`curl --limit-rate`) holds the slot, because the slot is acquired before the body is read. A second scan sent while it is in flight → 429 with `reason: concurrency`. The slow request then completes with 200.
