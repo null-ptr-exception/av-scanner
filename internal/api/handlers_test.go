@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rophy/av-scanner/internal/config"
@@ -301,5 +303,107 @@ func TestAPI_NotFound(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", rr.Code)
+	}
+}
+
+// newAuthTestAPI returns the API router with auth enabled against a mock
+// TokenReview server that authenticates every token as ns/sa.
+func newAuthTestAPI(t *testing.T, allowlist string) http.Handler {
+	t.Helper()
+
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"apiVersion":"authentication.k8s.io/v1","kind":"TokenReview","status":{"authenticated":true,"user":{"username":"system:serviceaccount:ns:sa","uid":"uid-1"}}}`))
+	}))
+	t.Cleanup(authServer.Close)
+
+	tmpDir := t.TempDir()
+	allowlistFile := filepath.Join(tmpDir, "allowlist.yaml")
+	if err := os.WriteFile(allowlistFile, []byte(allowlist), 0644); err != nil {
+		t.Fatalf("failed to write allowlist: %v", err)
+	}
+
+	cfg := &config.Config{
+		Port:         3000,
+		UploadDir:    tmpDir,
+		MaxFileSize:  10 * 1024 * 1024,
+		ActiveEngine: config.EngineMock,
+		LogLevel:     "error",
+		Drivers: map[config.EngineType]config.DriverConfig{
+			config.EngineClamAV:     {Engine: config.EngineClamAV},
+			config.EngineTrendMicro: {Engine: config.EngineTrendMicro},
+		},
+		Auth: config.AuthConfig{
+			Enabled:        true,
+			K8sAPIEndpoint: authServer.URL,
+			Timeout:        5000,
+			AllowlistFile:  allowlistFile,
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := scanner.New(cfg, logger)
+	api, err := New(s, cfg, logger)
+	if err != nil {
+		t.Fatalf("failed to create API: %v", err)
+	}
+	t.Cleanup(func() { api.Close() })
+
+	return api.Routes()
+}
+
+func TestAPI_ScanIsRateLimitedPerAccount(t *testing.T) {
+	h := newAuthTestAPI(t, `allowlist:
+  - ns/sa
+rateLimits:
+  default:
+    requestsPerMinute: 1
+    burst: 1
+`)
+
+	scan := func() *httptest.ResponseRecorder {
+		body, contentType := createMultipartFile(t, "file", "clean.txt", []byte("This is a clean file"))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/scan", body)
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("Authorization", "Bearer test-token")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := scan(); rr.Code != http.StatusOK {
+		t.Fatalf("first scan: status %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr := scan()
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("second scan: status %d, want 429: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["reason"] != "rate" {
+		t.Errorf("reason = %q, want rate", resp["reason"])
+	}
+
+	// Non-scan endpoints are not limited
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("health %d: status %d, want 200", i, rr.Code)
+		}
+	}
+
+	// Rejection is visible in metrics
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	mr := httptest.NewRecorder()
+	h.ServeHTTP(mr, req)
+	want := `av_ratelimit_rejected_total{account="ns/sa",reason="rate"}`
+	if !strings.Contains(mr.Body.String(), want) {
+		t.Errorf("metrics missing %s", want)
 	}
 }

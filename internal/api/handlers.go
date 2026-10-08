@@ -12,6 +12,7 @@ import (
 	"github.com/rophy/av-scanner/internal/auth"
 	"github.com/rophy/av-scanner/internal/config"
 	"github.com/rophy/av-scanner/internal/metrics"
+	"github.com/rophy/av-scanner/internal/ratelimit"
 	"github.com/rophy/av-scanner/internal/scanner"
 	"github.com/rophy/av-scanner/internal/version"
 )
@@ -22,6 +23,7 @@ type API struct {
 	logger         *slog.Logger
 	authMiddleware *auth.Middleware
 	allowlist      *auth.Allowlist
+	limiter        *ratelimit.Limiter
 }
 
 func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, error) {
@@ -41,8 +43,9 @@ func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, err
 			cfg.Auth.TokenPath,
 		)
 
-		// Load allowlist
-		allowlist, err := auth.NewAllowlist(cfg.Auth.AllowlistFile, logger)
+		// Load allowlist (and its optional rateLimits section)
+		limiter := ratelimit.New()
+		allowlist, err := auth.NewAllowlistWithLimiter(cfg.Auth.AllowlistFile, logger, limiter)
 		if err != nil {
 			return nil, err
 		}
@@ -53,6 +56,7 @@ func New(s *scanner.Scanner, cfg *config.Config, logger *slog.Logger) (*API, err
 		}
 
 		api.allowlist = allowlist
+		api.limiter = limiter
 		api.authMiddleware = auth.NewMiddleware(authClient, allowlist, logger, []string{
 			"/api/v1/live",
 			"/api/v1/ready",
@@ -72,7 +76,13 @@ func (a *API) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// API v1 routes
-	mux.HandleFunc("POST /api/v1/scan", a.handleScan)
+	// Scan is the only rate-limited route; it runs inside auth, so the
+	// caller identity is already in the request context
+	var scan http.Handler = http.HandlerFunc(a.handleScan)
+	if a.limiter != nil {
+		scan = a.limiter.Handler(callerAccount, a.logger, scan)
+	}
+	mux.Handle("POST /api/v1/scan", scan)
 	mux.HandleFunc("GET /api/v1/health", a.handleHealth)
 	mux.HandleFunc("GET /api/v1/engines", a.handleEngines)
 	mux.HandleFunc("GET /api/v1/ready", a.handleReady)
@@ -300,4 +310,13 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// callerAccount returns "namespace/serviceaccount" for the authenticated caller
+func callerAccount(r *http.Request) string {
+	id := auth.GetCallerIdentity(r.Context())
+	if id == nil {
+		return ""
+	}
+	return id.Namespace + "/" + id.ServiceAccount
 }

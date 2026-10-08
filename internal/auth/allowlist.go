@@ -8,11 +8,14 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
+
+	"github.com/rophy/av-scanner/internal/ratelimit"
 )
 
 // AllowlistConfig represents the YAML structure of the allowlist file
 type AllowlistConfig struct {
-	Allowlist []string `yaml:"allowlist"`
+	Allowlist  []string          `yaml:"allowlist"`
+	RateLimits *ratelimit.Config `yaml:"rateLimits"`
 }
 
 // Allowlist manages a thread-safe set of allowed service accounts
@@ -23,15 +26,23 @@ type Allowlist struct {
 	logger   *slog.Logger
 	watcher  *fsnotify.Watcher
 	stopCh   chan struct{}
+	limiter  *ratelimit.Limiter // optional; receives rateLimits on every load
 }
 
 // NewAllowlist creates a new Allowlist and loads entries from the given file
 func NewAllowlist(filePath string, logger *slog.Logger) (*Allowlist, error) {
+	return NewAllowlistWithLimiter(filePath, logger, nil)
+}
+
+// NewAllowlistWithLimiter creates a new Allowlist that also pushes the file's
+// rateLimits section to limiter on load and on every reload
+func NewAllowlistWithLimiter(filePath string, logger *slog.Logger, limiter *ratelimit.Limiter) (*Allowlist, error) {
 	a := &Allowlist{
 		entries:  make(map[string]bool),
 		filePath: filePath,
 		logger:   logger,
 		stopCh:   make(chan struct{}),
+		limiter:  limiter,
 	}
 
 	if err := a.load(); err != nil {
@@ -58,11 +69,26 @@ func (a *Allowlist) load() error {
 		entries[entry] = true
 	}
 
+	if config.RateLimits != nil {
+		if err := config.RateLimits.Validate(); err != nil {
+			return fmt.Errorf("invalid allowlist file: %w", err)
+		}
+		for account := range config.RateLimits.Overrides {
+			if !entries[account] {
+				a.logger.Warn("Rate limit override for account not in allowlist, ignoring", "account", account)
+			}
+		}
+	}
+
 	a.mu.Lock()
 	a.entries = entries
 	a.mu.Unlock()
 
-	a.logger.Info("Allowlist loaded", "entries", len(entries))
+	if a.limiter != nil {
+		a.limiter.Update(config.RateLimits, entries)
+	}
+
+	a.logger.Info("Allowlist loaded", "entries", len(entries), "rateLimits", config.RateLimits != nil)
 	return nil
 }
 
