@@ -68,7 +68,16 @@ inventory: |
       auth_allowlist_content: |
         allowlist:
           - test-client/scanner-client
+          - test-client/rate-client
+          - test-client/concurrency-client
           - av-scanner/av-scanner
+        rateLimits:
+          overrides:
+            test-client/rate-client:
+              requestsPerMinute: 1
+              burst: 1
+            test-client/concurrency-client:
+              maxConcurrent: 1
     children:
       av_scanner:
         hosts:

@@ -32,6 +32,8 @@ setup_file() {
     # --- Test service accounts ---
     _kubectl create namespace test-client --dry-run=client -o yaml | _kubectl apply -f -
     _kubectl -n test-client create serviceaccount scanner-client --dry-run=client -o yaml | _kubectl apply -f -
+    _kubectl -n test-client create serviceaccount rate-client --dry-run=client -o yaml | _kubectl apply -f -
+    _kubectl -n test-client create serviceaccount concurrency-client --dry-run=client -o yaml | _kubectl apply -f -
 
     # --- Mint SA token inside controller pod ---
     local controller_pod
@@ -258,6 +260,78 @@ setup() {
             echo "ERROR: expected 200 for ${endpoint}, got $status_code"; false
         }
     done
+}
+
+# ============================================
+# Rate limit tests (direct to VM1 — limits are per instance)
+# ============================================
+
+@test "rate limit: second scan within the window gets 429" {
+    local token
+    token=$(get_sa_token "test-client" "rate-client")
+    local url="http://${E2E_VM1_IP}:3000/api/v1/scan"
+
+    local first
+    first=$(echo "clean" | curl -4 -s -o /dev/null -w '%{http_code}' -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -F "file=@-;filename=first.txt" "$url")
+    [[ "$first" == "200" ]] || { echo "ERROR: first scan expected 200, got $first"; false; }
+
+    local headers="${BATS_TEST_TMPDIR}/headers"
+    local body
+    body=$(echo "clean" | curl -4 -s -D "$headers" -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -F "file=@-;filename=second.txt" "$url")
+
+    grep -q "^HTTP/1.1 429" "$headers" || {
+        echo "ERROR: expected 429"; cat "$headers"; echo "$body"; false
+    }
+    grep -qi "^Retry-After: [1-9]" "$headers" || {
+        echo "ERROR: missing Retry-After"; cat "$headers"; false
+    }
+    assert_json_field "$body" '.reason' 'rate'
+
+    curl -4 -s "http://${E2E_VM1_IP}:3000/metrics" \
+        | grep -q 'av_ratelimit_rejected_total{account="test-client/rate-client",reason="rate"}' || {
+        echo "ERROR: av_ratelimit_rejected_total not recorded"; false
+    }
+}
+
+@test "rate limit: concurrent scan over maxConcurrent gets 429" {
+    local token
+    token=$(get_sa_token "test-client" "concurrency-client")
+    local url="http://${E2E_VM1_IP}:3000/api/v1/scan"
+
+    # 1MB uploaded at 100KB/s holds the slot for ~10s: the slot is acquired
+    # before the body is read. "Expect:" disables 100-continue.
+    local slow_file="${BATS_TEST_TMPDIR}/slow.bin"
+    head -c 1048576 /dev/zero > "$slow_file"
+    curl -4 -s -o "${BATS_TEST_TMPDIR}/slow.body" -w '%{http_code}' \
+        --limit-rate 100K -H "Expect:" -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -F "file=@${slow_file};filename=slow.bin" "$url" \
+        > "${BATS_TEST_TMPDIR}/slow.code" &
+    local slow_pid=$!
+
+    sleep 2
+
+    local body code
+    body=$(echo "clean" | curl -4 -s -w '\n%{http_code}' -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -F "file=@-;filename=fast.txt" "$url")
+    code=$(echo "$body" | tail -1)
+    body=$(echo "$body" | sed '$d')
+
+    wait "$slow_pid"
+    local slow_code
+    slow_code=$(cat "${BATS_TEST_TMPDIR}/slow.code")
+
+    # A 401 here would be a reproduction of issue #15
+    [[ "$code" == "429" ]] || { echo "ERROR: concurrent scan expected 429, got $code: $body"; false; }
+    assert_json_field "$body" '.reason' 'concurrency'
+    [[ "$slow_code" == "200" ]] || {
+        echo "ERROR: slow scan expected 200, got $slow_code: $(cat "${BATS_TEST_TMPDIR}/slow.body")"; false
+    }
 }
 
 # ============================================
