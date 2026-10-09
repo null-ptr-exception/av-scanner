@@ -1,10 +1,15 @@
 package auth
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/rophy/av-scanner/internal/ratelimit"
 )
 
 func TestAllowlist_LoadAndCheck(t *testing.T) {
@@ -137,5 +142,126 @@ func TestAllowlist_Reload(t *testing.T) {
 	}
 	if !allowlist.IsAllowed("ns2", "sa2") {
 		t.Error("expected ns2/sa2 to be allowed after reload")
+	}
+}
+
+func writeAllowlistFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "allowlist.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write allowlist: %v", err)
+	}
+	return path
+}
+
+func TestAllowlist_RateLimitsAppliedToLimiter(t *testing.T) {
+	path := writeAllowlistFile(t, `allowlist:
+  - ns/sa
+rateLimits:
+  default:
+    maxConcurrent: 1
+`)
+	limiter := ratelimit.New()
+	if _, err := NewAllowlistWithLimiter(path, testLogger(), limiter); err != nil {
+		t.Fatalf("NewAllowlistWithLimiter: %v", err)
+	}
+
+	release, rej := limiter.Acquire("ns/sa")
+	if rej != nil {
+		t.Fatalf("first Acquire rejected: %+v", rej)
+	}
+	defer release()
+
+	if _, rej := limiter.Acquire("ns/sa"); rej == nil || rej.Reason != ratelimit.ReasonConcurrency {
+		t.Fatalf("second Acquire = %+v, want concurrency rejection", rej)
+	}
+}
+
+func TestAllowlist_NoRateLimitsMeansUnlimited(t *testing.T) {
+	path := writeAllowlistFile(t, `allowlist:
+  - ns/sa
+`)
+	limiter := ratelimit.New()
+	if _, err := NewAllowlistWithLimiter(path, testLogger(), limiter); err != nil {
+		t.Fatalf("NewAllowlistWithLimiter: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		if _, rej := limiter.Acquire("ns/sa"); rej != nil {
+			t.Fatalf("Acquire %d rejected: %+v", i, rej)
+		}
+	}
+}
+
+func TestAllowlist_InvalidRateLimitsFailsAtStartup(t *testing.T) {
+	path := writeAllowlistFile(t, `allowlist:
+  - ns/sa
+rateLimits:
+  default:
+    requestsPerMinute: 60
+`)
+	_, err := NewAllowlistWithLimiter(path, testLogger(), ratelimit.New())
+	if err == nil || !strings.Contains(err.Error(), "burst must be > 0") {
+		t.Fatalf("err = %v, want burst validation error", err)
+	}
+}
+
+func TestAllowlist_InvalidRateLimitsReloadKeepsPrevious(t *testing.T) {
+	path := writeAllowlistFile(t, `allowlist:
+  - ns/sa
+rateLimits:
+  default:
+    maxConcurrent: 1
+`)
+	limiter := ratelimit.New()
+	a, err := NewAllowlistWithLimiter(path, testLogger(), limiter)
+	if err != nil {
+		t.Fatalf("NewAllowlistWithLimiter: %v", err)
+	}
+
+	invalid := `allowlist:
+  - ns/sa
+  - ns/new
+rateLimits:
+  default:
+    maxConcurrent: -1
+`
+	if err := os.WriteFile(path, []byte(invalid), 0644); err != nil {
+		t.Fatalf("failed to write allowlist: %v", err)
+	}
+	if err := a.load(); err == nil {
+		t.Fatal("load() succeeded on invalid rateLimits, want error")
+	}
+
+	if a.IsAllowed("ns", "new") {
+		t.Error("allowlist changed on rejected reload")
+	}
+	release, rej := limiter.Acquire("ns/sa")
+	if rej != nil {
+		t.Fatalf("first Acquire rejected: %+v", rej)
+	}
+	defer release()
+	if _, rej := limiter.Acquire("ns/sa"); rej == nil {
+		t.Fatal("previous maxConcurrent=1 no longer enforced after rejected reload")
+	}
+}
+
+func TestAllowlist_OverrideForUnknownAccountWarns(t *testing.T) {
+	path := writeAllowlistFile(t, `allowlist:
+  - ns/sa
+rateLimits:
+  overrides:
+    ns/ghost:
+      maxConcurrent: 5
+`)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	if _, err := NewAllowlistWithLimiter(path, logger, ratelimit.New()); err != nil {
+		t.Fatalf("NewAllowlistWithLimiter: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "not in allowlist") || !strings.Contains(out, "ns/ghost") {
+		t.Errorf("expected warning about ns/ghost, got log: %s", out)
 	}
 }

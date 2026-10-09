@@ -34,12 +34,30 @@ var (
 		},
 		[]string{"engine", "result"},
 	)
+
+	rateLimitRejectedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "av_ratelimit_rejected_total",
+			Help: "Total requests rejected by per-account rate limits",
+		},
+		[]string{"account", "reason"},
+	)
+
+	rateLimitInflightScans = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "av_ratelimit_inflight_scans",
+			Help: "In-flight scans per account",
+		},
+		[]string{"account"},
+	)
 )
 
 func init() {
 	prometheus.MustRegister(httpRequestsTotal)
 	prometheus.MustRegister(httpRequestDuration)
 	prometheus.MustRegister(scansTotal)
+	prometheus.MustRegister(rateLimitRejectedTotal)
+	prometheus.MustRegister(rateLimitInflightScans)
 }
 
 // Handler returns the Prometheus metrics HTTP handler
@@ -50,6 +68,16 @@ func Handler() http.Handler {
 // RecordScan records a scan result
 func RecordScan(engine, result string) {
 	scansTotal.WithLabelValues(engine, result).Inc()
+}
+
+// RecordRateLimitRejected records a request rejected by per-account rate limits
+func RecordRateLimitRejected(account, reason string) {
+	rateLimitRejectedTotal.WithLabelValues(account, reason).Inc()
+}
+
+// SetRateLimitInflight sets the number of in-flight scans for an account
+func SetRateLimitInflight(account string, n int) {
+	rateLimitInflightScans.WithLabelValues(account).Set(float64(n))
 }
 
 // Middleware wraps an http.Handler and records request metrics

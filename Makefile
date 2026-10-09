@@ -2,6 +2,12 @@
 
 MINIKUBE_PROFILE ?= av-scanner
 
+# Host ports mapped to the minikube NodePorts (Istio gateway 30080, kfa 30082, Prometheus 30090)
+GATEWAY_PORT ?= 31080
+KFA_PORT ?= 31082
+PROM_PORT ?= 31090
+export GATEWAY_PORT KFA_PORT PROM_PORT
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | awk -F '\t' '{printf "  %-16s %s\n", $$1, $$2}'
 
@@ -22,7 +28,7 @@ env: ## Create VMs + minikube + Istio + kfa (full dev environment)
 		minikube start --profile $(MINIKUBE_PROFILE) \
 			--driver=docker \
 			--kubernetes-version=v1.24.17 \
-			--ports=30080:30080,30082:30082,30090:30090 \
+			--ports=$(GATEWAY_PORT):30080,$(KFA_PORT):30082,$(PROM_PORT):30090 \
 			--wait=apiserver \
 			--force; \
 	fi

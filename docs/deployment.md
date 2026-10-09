@@ -169,6 +169,7 @@ inventory: |
 | `auth_enabled` | false | Enable SA token authentication |
 | `k8s_api_endpoint` | (required if auth enabled) | URL of kube-federated-auth service |
 | `auth_allowlist_file` | /etc/av-scanner/allowlist.yaml | Path to SA allowlist on VM |
+| `auth_allowlist_content` | (none) | Allowlist file content: `allowlist` and optional `rateLimits` (see [API docs](api.md#rate-limits)) |
 | `k8s_auth_token_path` | /etc/av-scanner/sa-token | Path to SA token on VM |
 
 ## Service management

@@ -84,6 +84,42 @@ allowlist:
 
 The file is watched and reloaded automatically on change.
 
+### Rate limits
+
+Optional per-account limits on `POST /api/v1/scan`, configured in the same allowlist file:
+
+```yaml
+allowlist:
+  - team-a/uploader
+  - team-b/batch-job
+
+rateLimits:
+  default:
+    maxConcurrent: 4        # in-flight scans per account
+    requestsPerMinute: 60   # sustained rate
+    burst: 10               # token bucket size
+  overrides:
+    team-b/batch-job:
+      maxConcurrent: 16
+      requestsPerMinute: 600
+      burst: 50
+```
+
+- No `rateLimits` section → no limits.
+- `0` → unlimited for that field.
+- Overrides merge field-by-field over `default`.
+- `burst` must be > 0 when `requestsPerMinute` is set.
+- Limits are enforced per av-scanner instance. Behind a load balancer with N VMs, an account can reach up to N× the configured limit.
+- Edits to the file on the VM are hot-reloaded: an invalid file is rejected and the previous config stays active. Changes deployed via Ansible (`auth_allowlist_content`) restart the service, which resets limiter state.
+
+Rejected requests get `429` with a `Retry-After` header (seconds):
+
+```json
+{"error": "rate limit exceeded for team-a/uploader: concurrent scans (4/4)", "reason": "concurrency"}
+```
+
+`reason` is `concurrency` or `rate`. Metrics: `av_ratelimit_rejected_total{account,reason}`, `av_ratelimit_inflight_scans{account}`.
+
 ### Error responses
 
 | Status | Scenario |
@@ -91,3 +127,4 @@ The file is watched and reloaded automatically on change.
 | 401 | Missing or invalid Authorization header |
 | 401 | Token validation failed (expired, invalid signature) |
 | 403 | ServiceAccount not in allowlist |
+| 429 | Per-account rate limit exceeded (`reason`: `concurrency` or `rate`) |

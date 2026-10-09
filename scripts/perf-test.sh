@@ -19,7 +19,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="/tmp/k6-perf-data"
-PROM_URL="http://localhost:30090"
+PROM_URL="http://localhost:${PROM_PORT:-31090}"
 
 # Colors
 RED='\033[0;31m'
