@@ -24,10 +24,12 @@ setup_file() {
     local kfa_endpoint="http://${vm_gateway}:${KFA_PORT:-31082}"
 
     # --- Deploy via skaffold ---
-    (cd "$project_root" && skaffold delete --kube-context "$KUBE_CONTEXT") >&3 2>&1 || true
+    # skaffold runs with fd 3 closed: on the containerd runtime, minikube docker-env
+    # spawns a long-lived ssh-agent that would otherwise hold bats' fd 3 open and hang the run
+    (cd "$project_root" && skaffold delete --kube-context "$KUBE_CONTEXT" 3>&-) >&3 2>&1 || true
 
     echo "# Deploying via skaffold (e2e profile)..." >&3
-    (cd "$project_root" && skaffold run -p e2e --kube-context "$KUBE_CONTEXT") >&3 2>&1
+    (cd "$project_root" && skaffold run -p e2e --kube-context "$KUBE_CONTEXT" 3>&-) >&3 2>&1
 
     # --- Test service accounts ---
     _kubectl create namespace test-client --dry-run=client -o yaml | _kubectl apply -f -

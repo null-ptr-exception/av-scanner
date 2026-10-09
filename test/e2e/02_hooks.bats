@@ -41,10 +41,12 @@ setup_file() {
     export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
 
     # --- Clean slate + deploy via skaffold (hooks-only, no controller) ---
-    (cd "$project_root" && skaffold delete --kube-context "$KUBE_CONTEXT") >&3 2>&1 || true
+    # skaffold runs with fd 3 closed: on the containerd runtime, minikube docker-env
+    # spawns a long-lived ssh-agent that would otherwise hold bats' fd 3 open and hang the run
+    (cd "$project_root" && skaffold delete --kube-context "$KUBE_CONTEXT" 3>&-) >&3 2>&1 || true
 
     echo "# Deploying via skaffold (e2e-hooks profile)..." >&3
-    (cd "$project_root" && skaffold run -p e2e-hooks --kube-context "$KUBE_CONTEXT") >&3 2>&1
+    (cd "$project_root" && skaffold run -p e2e-hooks --kube-context "$KUBE_CONTEXT" 3>&-) >&3 2>&1
 
     echo "# Post-install hooks completed." >&3
 }
@@ -124,7 +126,7 @@ setup() {
     project_root="$(get_project_root)"
 
     echo "# Running skaffold run -p e2e-hooks (upgrade)..." >&3
-    (cd "$project_root" && skaffold run -p e2e-hooks --kube-context "$KUBE_CONTEXT") >&3 2>&1
+    (cd "$project_root" && skaffold run -p e2e-hooks --kube-context "$KUBE_CONTEXT" 3>&-) >&3 2>&1
 }
 
 @test "post-upgrade: deploy Job completed successfully" {

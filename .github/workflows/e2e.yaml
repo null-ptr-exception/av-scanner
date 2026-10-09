@@ -93,8 +93,6 @@ jobs:
 
       - name: Setup environment
         run: make env
-        env:
-          MINIKUBE_START_ARGS: --container-runtime=containerd
 
       - name: Run e2e tests
         run: make test-e2e
