@@ -30,6 +30,10 @@ jobs:
   e2e:
     runs-on: [self-hosted, kata-rophy]
     needs: unit
+    env:
+      # Pre-installed Trend Micro VM on the runner host, built outside the workspace
+      E2E_TM_VM: e2e-tm
+      E2E_TM_SSH_KEY: /home/gha-runner/e2e-tm/.vms/id_ed25519
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -108,5 +112,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
+          # Destroys e2e-1 (and a leftover e2e-2); never the Trend Micro VM
           ./scripts/vm-destroy.sh --name e2e --count 2
           minikube delete --profile av-scanner || true
