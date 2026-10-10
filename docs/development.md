@@ -7,7 +7,7 @@ make env      # Create VMs + minikube cluster + kubectl context + skaffold-value
 make deploy   # Build deployer image and deploy via Helm
 ```
 
-`make env` creates two VMs via libvirt, a minikube cluster (profile `av-scanner`, K8s 1.24), the SSH key secret, and generates `skaffold-values.yaml` with VM IPs. Idempotent — safe to run repeatedly.
+`make env` creates two ClamAV VMs via libvirt (see [Engines in e2e](#engines-in-e2e) to make the second one Trend Micro), a minikube cluster (profile `av-scanner`, K8s 1.24), the SSH key secret, and generates `skaffold-values.yaml` with VM IPs. Idempotent — safe to run repeatedly.
 
 Minikube NodePorts are mapped to host ports `GATEWAY_PORT` (Istio gateway, default 31080), `KFA_PORT` (kube-federated-auth, default 31082), and `PROM_PORT` (Prometheus, default 31090). Override them if they clash with other services, e.g. `make env test-e2e GATEWAY_PORT=32080`. The port mapping is fixed when the minikube profile is created, so changing it requires `minikube delete --profile av-scanner` first.
 
@@ -35,24 +35,34 @@ make test-perf      # k6 load tests
 
 ### Engines in e2e
 
-The e2e environment has one VM per engine: `e2e-1` runs ClamAV (`vm1`) and a pre-installed Trend Micro VM runs Trend Micro (`vm2`).
+The e2e environment has two VMs. `vm1` is always `e2e-1` running ClamAV. `vm2` depends on `E2E_TM_VM`:
+
+- **Unset (default):** `vm2` is `e2e-2`, a second ClamAV VM. Everything runs except `11_trendmicro.bats`, which is skipped. No Trend Micro account needed.
+- **Set to a VM name:** `vm2` is that pre-installed Trend Micro VM, so both engines are tested. CI does this on its self-hosted runner.
+
+```bash
+make env test-e2e                    # ClamAV only
+make env test-e2e E2E_TM_VM=e2e-tm   # ClamAV + Trend Micro
+```
+
+Use the same `E2E_TM_VM` for `make env` and `make test-e2e`, and run `make clean` when switching.
 
 | File | Covers |
 |------|--------|
 | `01_e2e.bats` | Engine-agnostic: scans on each VM directly (checking its engine), auth, rate limits, metrics, load balancing through the gateway |
 | `02_hooks.bats` | Helm hook deploys to both VMs, each with its configured engine |
 | `10_clamav.bats` | ClamAV only: `Heuristics.Limits.Exceeded` for an over-limit archive |
-| `11_trendmicro.bats` | Trend Micro only: `dsa_scan` allowed, RTS log path, detections logged in `ds_am.log` |
+| `11_trendmicro.bats` | Trend Micro only (skipped without `E2E_TM_VM`): `dsa_scan` allowed, RTS log path, detections logged in `ds_am.log` |
 
 The Trend Micro VM is never created or destroyed by `make`, CI or the tests, since it needs a registered agent. `scripts/tm-vm.sh prepare [--revert]` reverts it to its `tm-base` snapshot, authorizes `.vms/id_ed25519` on it, and waits until `dsa_scan` works.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `E2E_TM_VM` | `e2e-tm` | libvirt name of the Trend Micro VM |
+| `E2E_TM_VM` | (unset) | libvirt name of the Trend Micro VM; unset means ClamAV only |
 | `E2E_TM_SSH_KEY` | `.vms/id_ed25519` | Key the VM was built with, if it was built from another checkout |
 | `TM_RTS_LOG_PATH` | `/var/opt/ds_agent/diag/ds_am.log` | Agent log with RTS detections (agent 20.x) |
 
-To build the Trend Micro VM (once per host), from a checkout that CI does not wipe:
+To build the Trend Micro VM (once per host), from a checkout that CI does not wipe. It needs a Trend Vision One account with Server & Workload Protection (a trial works):
 
 1. `./scripts/vm-init.sh --name e2e-tm`
 2. Run the agent install script from the Trend Micro console on it. Never commit that script: it holds the tenant's activation token.
@@ -116,8 +126,8 @@ VMs are managed via libvirt/virsh. Each VM gets a real IP on the default NAT net
 
 ```bash
 # Create/destroy via make
-make env    # creates e2e-1 (ClamAV), prepares the Trend Micro VM
-make clean  # destroys VMs + minikube
+make env    # creates e2e-1 and e2e-2 (ClamAV), or e2e-1 + prepares $E2E_TM_VM
+make clean  # destroys the ClamAV VMs + minikube (never the Trend Micro VM)
 
 # Direct script usage
 ./scripts/vm-init.sh --name e2e-1 --force

@@ -8,11 +8,26 @@ KFA_PORT ?= 31082
 PROM_PORT ?= 31090
 export GATEWAY_PORT KFA_PORT PROM_PORT
 
-# Pre-installed Trend Micro VM (vm2). E2E_TM_SSH_KEY is the key it was built with.
-E2E_TM_VM ?= e2e-tm
+# vm2 is a second ClamAV VM (e2e-2) by default. Set E2E_TM_VM to the libvirt name of
+# a pre-installed Trend Micro VM to use it as vm2 instead (see docs/development.md).
+# E2E_TM_SSH_KEY is the key that VM was built with.
+E2E_TM_VM ?=
 E2E_TM_SSH_KEY ?= $(CURDIR)/.vms/id_ed25519
 TM_RTS_LOG_PATH ?= /var/opt/ds_agent/diag/ds_am.log
 export E2E_TM_VM E2E_TM_SSH_KEY TM_RTS_LOG_PATH
+
+# e2e-1/e2e-2 are the ClamAV VMs that make env creates and make clean destroys
+ifneq ($(filter e2e-1 e2e-2,$(E2E_TM_VM)),)
+$(error E2E_TM_VM=$(E2E_TM_VM) clashes with the ClamAV VM names; give the Trend Micro VM another name)
+endif
+
+ifeq ($(E2E_TM_VM),)
+VM2_NAME := e2e-2
+VM2_ENGINE := clamav
+else
+VM2_NAME := $(E2E_TM_VM)
+VM2_ENGINE := trendmicro
+endif
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | awk -F '\t' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -21,13 +36,15 @@ help: ## Show this help
 # Environment
 # ============================================
 
-env: ## Create ClamAV VM, prepare Trend Micro VM, minikube + Istio + kfa (full dev environment)
-	@if virsh --connect qemu:///system dominfo e2e-1 >/dev/null 2>&1; then \
-		echo "VM e2e-1 already exists"; \
-	else \
-		./scripts/vm-init.sh --name e2e-1 --force; \
-	fi
-	./scripts/tm-vm.sh prepare
+env: ## Create VMs (ClamAV, or ClamAV + Trend Micro with E2E_TM_VM), minikube + Istio + kfa
+	@for name in e2e-1 $(if $(E2E_TM_VM),,e2e-2); do \
+		if virsh --connect qemu:///system dominfo $$name >/dev/null 2>&1; then \
+			echo "VM $$name already exists"; \
+		else \
+			./scripts/vm-init.sh --name $$name --force || exit 1; \
+		fi; \
+	done
+	$(if $(E2E_TM_VM),./scripts/tm-vm.sh prepare)
 	@if minikube status --profile $(MINIKUBE_PROFILE) >/dev/null 2>&1; then \
 		echo "Minikube profile $(MINIKUBE_PROFILE) already running"; \
 	else \
@@ -44,7 +61,7 @@ env: ## Create ClamAV VM, prepare Trend Micro VM, minikube + Istio + kfa (full d
 		kubectl --context $(MINIKUBE_PROFILE) -n av-scanner create secret generic av-scanner-ssh-key \
 			--from-file=id_ed25519=.vms/id_ed25519
 	@VM1_IP=$$(virsh --connect qemu:///system domifaddr e2e-1 | grep -oP '(\d+\.){3}\d+' | head -1); \
-	VM2_IP=$$(./scripts/tm-vm.sh ip); \
+	VM2_IP=$$(virsh --connect qemu:///system domifaddr $(VM2_NAME) | grep -oP '(\d+\.){3}\d+' | head -1); \
 	printf '%s\n' \
 		"sshKey:" \
 		"  existingSecret: av-scanner-ssh-key" \
@@ -56,7 +73,7 @@ env: ## Create ClamAV VM, prepare Trend Micro VM, minikube + Istio + kfa (full d
 		"    - name: AV_SCANNER_VM2_IP" \
 		"      value: \"$$VM2_IP\"" \
 		"    - name: AV_SCANNER_VM2_AV_ENGINE" \
-		"      value: trendmicro" \
+		"      value: $(VM2_ENGINE)" \
 		"    - name: AV_SCANNER_VM2_TM_RTS_LOG_PATH" \
 		"      value: $(TM_RTS_LOG_PATH)" \
 		"" \
@@ -74,7 +91,7 @@ env: ## Create ClamAV VM, prepare Trend Micro VM, minikube + Istio + kfa (full d
 		"          vm2:" \
 		"            ansible_host: $$VM2_IP" \
 		"            ansible_user: ubuntu" \
-		"            av_engine: trendmicro" \
+		"            av_engine: $(VM2_ENGINE)" \
 		"            tm_rts_log_path: $(TM_RTS_LOG_PATH)" \
 		> skaffold-values.yaml; \
 	echo "  Generated skaffold-values.yaml"
@@ -124,19 +141,18 @@ env: ## Create ClamAV VM, prepare Trend Micro VM, minikube + Istio + kfa (full d
 	kubectl --context $(MINIKUBE_PROFILE) rollout status deployment/kube-federated-auth -n kube-federated-auth --timeout=120s
 	# --- Summary ---
 	@VM1_IP=$$(virsh --connect qemu:///system domifaddr e2e-1 | grep -oP '(\d+\.){3}\d+' | head -1); \
-	VM2_IP=$$(./scripts/tm-vm.sh ip); \
+	VM2_IP=$$(virsh --connect qemu:///system domifaddr $(VM2_NAME) | grep -oP '(\d+\.){3}\d+' | head -1); \
 	echo ""; \
 	echo "Environment ready:"; \
 	echo "  kubectl context: $(MINIKUBE_PROFILE)"; \
 	echo "  e2e-1 (clamav): $$VM1_IP"; \
-	echo "  $(E2E_TM_VM) (trendmicro): $$VM2_IP"
+	echo "  $(VM2_NAME) ($(VM2_ENGINE)): $$VM2_IP"
 
 deploy: ## Build deployer image and deploy via Helm (skaffold run)
 	skaffold run --kube-context $(MINIKUBE_PROFILE)
 
-clean: ## Delete minikube cluster and ClamAV VM (never the Trend Micro VM)
+clean: ## Delete minikube cluster and ClamAV VMs (never the Trend Micro VM)
 	minikube delete --profile $(MINIKUBE_PROFILE) || true
-	# e2e-2 is a leftover from the old two-ClamAV-VM layout
 	./scripts/vm-destroy.sh --name e2e --count 2 || true
 	rm -f skaffold-values.yaml .e2e-values.yaml
 

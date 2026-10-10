@@ -21,10 +21,10 @@ setup_file() {
     e2e_vm_revert
 
     # --- Re-discover VM IPs ---
-    export E2E_VM1_IP=$(virsh_get_ip "e2e-1")
-    export E2E_VM2_IP=$(virsh_get_ip "$E2E_TM_VM")
+    export E2E_VM1_IP=$(virsh_get_ip "$E2E_VM1_NAME")
+    export E2E_VM2_IP=$(virsh_get_ip "$E2E_VM2_NAME")
     export E2E_SSH_KEY="$ssh_key"
-    echo "# VMs reverted: e2e-1=${E2E_VM1_IP} (clamav), ${E2E_TM_VM}=${E2E_VM2_IP} (trendmicro)"
+    echo "# VMs reverted: ${E2E_VM1_NAME}=${E2E_VM1_IP} (${E2E_VM1_ENGINE}), ${E2E_VM2_NAME}=${E2E_VM2_IP} (${E2E_VM2_ENGINE})"
 
     export MINIKUBE_PROFILE="av-scanner"
     export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
@@ -50,8 +50,8 @@ setup() {
     _e2e_init
     export MINIKUBE_PROFILE="av-scanner"
     export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
-    export E2E_VM1_IP="${E2E_VM1_IP:-$(virsh_get_ip e2e-1)}"
-    export E2E_VM2_IP="${E2E_VM2_IP:-$(virsh_get_ip "$E2E_TM_VM")}"
+    export E2E_VM1_IP="${E2E_VM1_IP:-$(virsh_get_ip "$E2E_VM1_NAME")}"
+    export E2E_VM2_IP="${E2E_VM2_IP:-$(virsh_get_ip "$E2E_VM2_NAME")}"
     export E2E_SSH_KEY="${E2E_SSH_KEY:-$(get_project_root)/.vms/id_ed25519}"
 }
 

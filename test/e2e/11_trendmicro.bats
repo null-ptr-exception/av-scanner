@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # Trend Micro-specific e2e tests, against vm2 ($E2E_TM_VM) directly.
+# Skipped unless E2E_TM_VM names a pre-installed Trend Micro VM.
 #
 # Needs av-scanner deployed on the VMs: by the earlier test files when run as
 # part of the suite, or by make deploy.
@@ -7,6 +8,9 @@
 setup_file() {
     load 'vm_helper'
     load 'test_helper'
+    if [[ "$E2E_VM2_ENGINE" != "trendmicro" ]]; then
+        skip "no Trend Micro VM (set E2E_TM_VM, see docs/development.md)"
+    fi
     e2e_vm_setup
     export KUBE_CONTEXT="av-scanner"
     export TM_RTS_LOG_PATH="${TM_RTS_LOG_PATH:-/var/opt/ds_agent/diag/ds_am.log}"

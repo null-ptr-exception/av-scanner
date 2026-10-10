@@ -62,14 +62,16 @@ cmd_prepare() {
 
     if [[ "$TM_KEY" != "$RUN_KEY" ]]; then
         echo "# Authorizing ${RUN_KEY}.pub on ${TM_VM}..."
-        tm_ssh "grep -qxF '$(cat "${RUN_KEY}.pub")' ~/.ssh/authorized_keys || echo '$(cat "${RUN_KEY}.pub")' >> ~/.ssh/authorized_keys"
+        # Key goes over stdin, so nothing in it needs quoting
+        tm_ssh 'k=$(cat); grep -qxF "$k" ~/.ssh/authorized_keys || echo "$k" >> ~/.ssh/authorized_keys' < "${RUN_KEY}.pub"
     fi
 
     # After boot or revert the agent needs ~10-20s before it accepts scans
     echo "# Waiting for Trend Micro agent on ${TM_VM}..."
     local code="" i
     for i in $(seq 1 36); do
-        code=$(tm_ssh 'echo ok > /tmp/tm-ready.txt; sudo /opt/ds_agent/dsa_scan --target /tmp/tm-ready.txt --json >/dev/null; echo $?; rm -f /tmp/tm-ready.txt')
+        # || true: an ssh failure leaves code empty and retries instead of exiting
+        code=$(tm_ssh 'echo ok > /tmp/tm-ready.txt; sudo /opt/ds_agent/dsa_scan --target /tmp/tm-ready.txt --json >/dev/null; echo $?; rm -f /tmp/tm-ready.txt') || true
         if [[ "$code" == "0" ]]; then
             echo "# Trend Micro agent ready on ${TM_VM}"
             return 0
