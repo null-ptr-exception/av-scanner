@@ -150,6 +150,26 @@ setup() {
     assert_json_field "$resp" '.status' 'infected'
 }
 
+@test "archive exceeding engine scan limits is not reported clean" {
+    # 200MB of zeros gzips to ~200KB but expands past clamd's MaxFileSize (100M)
+    local archive="${BATS_TEST_TMPDIR}/oversized.gz"
+    python3 - "$archive" <<'EOF'
+import gzip, sys
+with gzip.open(sys.argv[1], "wb") as f:
+    chunk = b"\0" * (1 << 20)
+    for _ in range(200):
+        f.write(chunk)
+EOF
+
+    local resp
+    resp=$(curl -4 -s -X POST \
+        -H "Authorization: Bearer ${AUTH_TOKEN}" \
+        -F "file=@${archive};filename=oversized.gz" \
+        "${API_URL}/api/v1/scan")
+    assert_json_field "$resp" '.status' 'infected'
+    assert_json_field "$resp" '.signature | startswith("Heuristics.Limits.Exceeded")' 'true'
+}
+
 @test "gateway load-balances across both VMs" {
     load 'vm_helper'
 

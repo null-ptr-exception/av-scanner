@@ -48,6 +48,20 @@
       LogTime yes
   notify: Restart ClamAV daemon
 
+- name: Configure ClamAV scan limits (fail closed)
+  lineinfile:
+    path: /etc/clamav/clamd.conf
+    regexp: "^{{ item.key }} "
+    line: "{{ item.key }} {{ item.value }}"
+  loop:
+    - { key: MaxFileSize, value: "{{ clamav_max_file_size }}" }
+    - { key: MaxScanSize, value: "{{ clamav_max_scan_size }}" }
+    - { key: AlertExceedsMax, value: "true" }
+    - { key: AlertEncrypted, value: "true" }
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Restart ClamAV daemon
+
 - name: Create clamonacc systemd service
   copy:
     content: |

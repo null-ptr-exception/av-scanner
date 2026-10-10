@@ -1,2 +1,6 @@
 scan_dir: /tmp/av-scanner
 clamav_log_dir: /var/log/clamav
+# Scan limits. Anything clamd cannot fully scan (over a limit, or encrypted)
+# is reported as Heuristics.* FOUND instead of OK, so it fails closed.
+clamav_max_file_size: 100M   # matches av-scanner's default MAX_FILE_SIZE
+clamav_max_scan_size: 400M   # total data scanned per file, incl. archive contents

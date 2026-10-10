@@ -42,6 +42,15 @@
       failed_when: clamonacc.status.ActiveState != "active"
       when: av_engine == "clamav"
 
+    - name: ClamAV scan limits fail closed, without duplicate directives
+      shell: grep -E "^(MaxFileSize|MaxScanSize|AlertExceedsMax|AlertEncrypted) " /etc/clamav/clamd.conf | sort
+      register: clamav_limits
+      changed_when: false
+      failed_when: >-
+        clamav_limits.stdout_lines != ["AlertEncrypted true", "AlertExceedsMax true",
+        "MaxFileSize 100M", "MaxScanSize 400M"]
+      when: av_engine == "clamav"
+
     - name: node_exporter is running
       systemd:
         name: node_exporter
