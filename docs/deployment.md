@@ -150,7 +150,7 @@ inventory: |
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `av_engine` | clamav | Active engine (`clamav` / `trendmicro`) |
+| `av_engine` | clamav | Active engine (`clamav` / `trendmicro`). Production targets `trendmicro`; `clamav` is for development and e2e testing |
 | `av_scanner_port` | 3000 | HTTP server port |
 | `scan_dir` | /tmp/av-scanner | Upload/scan directory |
 | `log_level` | info | Log level |
@@ -161,6 +161,12 @@ inventory: |
 |----------|---------|-------------|
 | `clamav_rts_log_path` | /var/log/clamav/clamonacc.log | ClamAV real-time scan log |
 | `tm_rts_log_path` | /var/log/ds_agent/ds_agent.log | TrendMicro DS Agent log |
+| `clamav_max_file_size` | 100M | clamd `MaxFileSize` |
+| `clamav_max_scan_size` | 400M | clamd `MaxScanSize` (total data scanned per file, incl. archive contents) |
+
+ClamAV is configured with `AlertExceedsMax` and `AlertEncrypted`, so a file it cannot fully scan (over a limit, or encrypted) is reported as infected with a `Heuristics.*` signature instead of clean. Trend Micro scan limits are set in the Deep Security policy, outside this repo.
+
+Known gap (ClamAV 1.5.4, verified): a single *deflated zip member* that inflates past `MaxFileSize` is skipped without an alert, so its contents are not scanned. Gzip/tar.gz, stored zips and other members of the same zip are handled correctly.
 
 #### Authentication
 

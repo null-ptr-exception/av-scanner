@@ -33,6 +33,11 @@ curl -X POST -F "file=@testfile.txt" http://<VM_IP>:3000/api/v1/scan
 }
 ```
 
+**Response (scan failed, 500):** when the on-demand scan gives no definitive verdict (e.g. the engine reports an error, skips the file, or its output cannot be parsed), the service waits briefly for a real-time detection of the file. If one arrives, the response is `infected`; otherwise it is 500. Clients must treat 500 as not clean.
+```json
+{"error": "Scan failed: ..."}
+```
+
 ### GET /api/v1/health
 
 Health check for all engines.

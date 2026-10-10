@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rophy/av-scanner/internal/cache"
 	"github.com/rophy/av-scanner/internal/config"
 	"github.com/rophy/av-scanner/internal/drivers"
 )
@@ -208,5 +209,63 @@ func TestScanner_GetUploadPath(t *testing.T) {
 
 	if path != expected {
 		t.Errorf("expected path %s, got %s", expected, path)
+	}
+}
+
+// errorDriver is a driver whose manual scan never reaches a verdict.
+type errorDriver struct {
+	*drivers.MockDriver
+}
+
+func (d *errorDriver) Config() config.DriverConfig {
+	return config.DriverConfig{Engine: config.EngineMock, RTSCacheBaseDelay: 50}
+}
+
+func (d *errorDriver) ManualScan(filePath string) (*drivers.ScanResult, error) {
+	return &drivers.ScanResult{Status: drivers.StatusError, Engine: config.EngineMock}, nil
+}
+
+func newErrorDriverScanner(t *testing.T) (*Scanner, string) {
+	t.Helper()
+	s, tmpDir := newTestScanner(t)
+	s.drivers[config.EngineMock] = &errorDriver{drivers.NewMockDriver(config.DriverConfig{Engine: config.EngineMock})}
+	return s, tmpDir
+}
+
+func TestScanner_EngineErrorIsNeverClean(t *testing.T) {
+	s, tmpDir := newErrorDriverScanner(t)
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(filePath, []byte("Hello, World!"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	result, err := s.Scan(filePath, "test-id", "test.txt", 13)
+	if err == nil {
+		t.Fatalf("expected scan error, got status %s", result.Status)
+	}
+}
+
+func TestScanner_EngineErrorUsesRTSDetection(t *testing.T) {
+	s, tmpDir := newErrorDriverScanner(t)
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(filePath, []byte("Hello, World!"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+	absPath, _ := filepath.Abs(filePath)
+	s.detectionCache.Add(absPath, &cache.Detection{FilePath: filePath, Status: "infected", Signature: "rts-sig"})
+
+	result, err := s.Scan(filePath, "test-id", "test.txt", 13)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != drivers.StatusInfected {
+		t.Errorf("expected status infected, got %s", result.Status)
+	}
+	if result.Signature != "rts-sig" {
+		t.Errorf("expected signature rts-sig, got %s", result.Signature)
 	}
 }

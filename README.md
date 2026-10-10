@@ -31,6 +31,8 @@ flowchart TB
 | **RTS Log** | `/var/log/clamav/clamonacc.log` | `/var/log/ds_agent/ds_agent.log` |
 | **On-demand Binary** | `clamdscan` | `dsa_scan` |
 
+**Target engine: Trend Micro.** Production deployments run the Trend Micro DS Agent, and design decisions, tuning and behaviour target it. ClamAV is a free stand-in so development and e2e tests can do real scanning (including real-time quarantine) without a Trend Micro license. Its configuration is kept fail-closed for test realism (over-limit and encrypted files that ClamAV flags are reported as infected; see [known gaps](docs/deployment.md#engine-specific) for the deflated zip member exception), not tuned for production use.
+
 ## Scan Flow
 
 1. **File uploaded** to scan directory

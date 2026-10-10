@@ -1,14 +1,18 @@
 package drivers
 
 import (
+	"io"
+	"log/slog"
 	"testing"
+
+	"github.com/rophy/av-scanner/internal/config"
 )
 
 func TestTmVirusFoundRegex(t *testing.T) {
 	tests := []struct {
-		name     string
-		line     string
-		wantPath string
+		name      string
+		line      string
+		wantPath  string
 		wantMatch bool
 	}{
 		{
@@ -50,6 +54,89 @@ func TestTmVirusFoundRegex(t *testing.T) {
 				if matches != nil {
 					t.Errorf("expected no match but got %v", matches)
 				}
+			}
+		})
+	}
+}
+
+func TestParseManualScanOutput(t *testing.T) {
+	d := NewTrendMicroDriver(config.DriverConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+
+	tests := []struct {
+		name          string
+		output        string
+		exitCode      int
+		wantStatus    ScanStatus
+		wantSignature string
+	}{
+		{
+			name:       "scanned clean",
+			output:     `{"traceID":"t","numOfFileScanned":1,"numOfFileSkipped":0,"numOfFileInfected":0,"errorCode":0,"infectedFiles":[]}`,
+			wantStatus: StatusClean,
+		},
+		{
+			name:          "infected",
+			output:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":0,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			wantStatus:    StatusInfected,
+			wantSignature: "Eicar_test_file",
+		},
+		{
+			name:          "infected with errorCode is still infected",
+			output:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":5,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			wantStatus:    StatusInfected,
+			wantSignature: "Eicar_test_file",
+		},
+		{
+			name:       "non-zero errorCode is error",
+			output:     `{"numOfFileScanned":1,"numOfFileInfected":0,"errorCode":5}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "skipped is error",
+			output:     `{"numOfFileScanned":0,"numOfFileSkipped":1,"errorCode":0}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "skipped alongside scanned is error",
+			output:     `{"numOfFileScanned":1,"numOfFileSkipped":1,"errorCode":0}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "nothing scanned is error",
+			output:     `{}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "unparseable output with exit 0 is error",
+			output:     "Scan finished",
+			wantStatus: StatusError,
+		},
+		{
+			name:       "empty output with exit 0 is error",
+			output:     "",
+			wantStatus: StatusError,
+		},
+		{
+			name:       "unparseable output with non-zero exit is error",
+			output:     "dsa_scan: connection refused",
+			exitCode:   1,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "unparseable output mentioning malware is infected",
+			output:     "Malware detected: Eicar_test_file",
+			wantStatus: StatusInfected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, signature := d.parseManualScanOutput(tt.output, tt.exitCode)
+			if status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", status, tt.wantStatus)
+			}
+			if signature != tt.wantSignature {
+				t.Errorf("signature = %q, want %q", signature, tt.wantSignature)
 			}
 		})
 	}
