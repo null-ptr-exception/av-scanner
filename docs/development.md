@@ -33,6 +33,32 @@ make test-perf      # k6 load tests
 | E2E | Full pipeline: skaffold build+deploy → molecule → scan/auth via Istio gateway |
 | Performance | Load test: 80% clean / 20% EICAR, verifies 100% correct results |
 
+### Engines in e2e
+
+The e2e environment has one VM per engine: `e2e-1` runs ClamAV (`vm1`) and a pre-installed Trend Micro VM runs Trend Micro (`vm2`).
+
+| File | Covers |
+|------|--------|
+| `01_e2e.bats` | Engine-agnostic: scans on each VM directly (checking its engine), auth, rate limits, metrics, load balancing through the gateway |
+| `02_hooks.bats` | Helm hook deploys to both VMs, each with its configured engine |
+| `10_clamav.bats` | ClamAV only: `Heuristics.Limits.Exceeded` for an over-limit archive |
+| `11_trendmicro.bats` | Trend Micro only: `dsa_scan` allowed, RTS log path, detections logged in `ds_am.log` |
+
+The Trend Micro VM is never created or destroyed by `make`, CI or the tests, since it needs a registered agent. `scripts/tm-vm.sh prepare [--revert]` reverts it to its `tm-base` snapshot, authorizes `.vms/id_ed25519` on it, and waits until `dsa_scan` works.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `E2E_TM_VM` | `e2e-tm` | libvirt name of the Trend Micro VM |
+| `E2E_TM_SSH_KEY` | `.vms/id_ed25519` | Key the VM was built with, if it was built from another checkout |
+| `TM_RTS_LOG_PATH` | `/var/opt/ds_agent/diag/ds_am.log` | Agent log with RTS detections (agent 20.x) |
+
+To build the Trend Micro VM (once per host), from a checkout that CI does not wipe:
+
+1. `./scripts/vm-init.sh --name e2e-tm`
+2. Run the agent install script from the Trend Micro console on it. Never commit that script: it holds the tenant's activation token.
+3. In the console, make sure the endpoint uses a policy with Anti-Malware on and "Allow agent to trigger or cancel a manual scan" enabled (Anti-Malware → General). Otherwise `dsa_scan` exits 251 or 249.
+4. When `sudo /opt/ds_agent/dsa_scan --target <file> --json` exits 0, snapshot it: `source scripts/lib/virsh.sh && virsh_snapshot_create e2e-tm tm-base`.
+
 ### Running molecule interactively
 
 ```bash
@@ -90,12 +116,12 @@ VMs are managed via libvirt/virsh. Each VM gets a real IP on the default NAT net
 
 ```bash
 # Create/destroy via make
-make env    # creates e2e-1, e2e-2
+make env    # creates e2e-1 (ClamAV), prepares the Trend Micro VM
 make clean  # destroys VMs + minikube
 
 # Direct script usage
-./scripts/vm-init.sh --name e2e --count 2 --force
-./scripts/vm-destroy.sh --name e2e --count 2
+./scripts/vm-init.sh --name e2e-1 --force
+./scripts/vm-destroy.sh --name e2e-1
 ```
 
 Prerequisites: `virsh`, `virt-install`, `qemu-img`, `cloud-localds`

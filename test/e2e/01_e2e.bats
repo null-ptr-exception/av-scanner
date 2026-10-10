@@ -2,7 +2,9 @@
 # Scan and auth e2e tests for av-scanner.
 #
 # Deploys via skaffold (e2e profile) + molecule inside the controller pod,
-# then tests scan/auth behavior through the Istio gateway.
+# then tests engine-agnostic behavior: scans on each engine's VM directly,
+# auth and load balancing through the Istio gateway. Engine-specific tests
+# live in 10_clamav.bats and 11_trendmicro.bats.
 #
 # Suite-level infra (VMs, Istio, kfa) is handled by setup_suite.bash.
 
@@ -129,45 +131,45 @@ setup() {
     assert_json_field "$resp" '.status' 'healthy'
 }
 
-@test "scan clean file returns clean" {
-    local resp
-    resp=$(echo "clean test content" | curl -4 -s -X POST \
+# Scans go to each VM directly: the gateway balances across both engines, so a
+# scan through it could land on either one.
+
+# Usage: scan_on_vm <vm_ip> <file> <filename>
+scan_on_vm() {
+    curl -4 -s -X POST \
         -H "Authorization: Bearer ${AUTH_TOKEN}" \
-        -F "file=@-;filename=clean.txt" \
-        "${API_URL}/api/v1/scan")
+        -F "file=@${2};filename=${3}" \
+        "http://${1}:3000/api/v1/scan"
+}
+
+@test "scan clean file returns clean on each engine" {
+    local clean="${BATS_TEST_TMPDIR}/clean.txt"
+    echo "clean test content" > "$clean"
+
+    local resp
+    resp=$(scan_on_vm "$E2E_VM1_IP" "$clean" clean.txt)
     assert_json_field "$resp" '.status' 'clean'
+    assert_json_field "$resp" '.engine' "$E2E_VM1_ENGINE"
+
+    resp=$(scan_on_vm "$E2E_VM2_IP" "$clean" clean.txt)
+    assert_json_field "$resp" '.status' 'clean'
+    assert_json_field "$resp" '.engine' "$E2E_VM2_ENGINE"
 }
 
-@test "scan EICAR test file returns infected" {
-    local eicar
-    eicar=$(echo 'X5x!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | sed 's/x/O/')
+@test "scan EICAR test file returns infected on each engine" {
+    local eicar="${BATS_TEST_TMPDIR}/eicar.com"
+    echo 'X5x!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | sed 's/x/O/' > "$eicar"
 
     local resp
-    resp=$(echo "$eicar" | curl -4 -s -X POST \
-        -H "Authorization: Bearer ${AUTH_TOKEN}" \
-        -F "file=@-;filename=eicar.com" \
-        "${API_URL}/api/v1/scan")
+    resp=$(scan_on_vm "$E2E_VM1_IP" "$eicar" eicar.com)
     assert_json_field "$resp" '.status' 'infected'
-}
+    assert_json_field "$resp" '.engine' "$E2E_VM1_ENGINE"
+    assert_json_field "$resp" '.signature | length > 0' 'true'
 
-@test "archive exceeding engine scan limits is not reported clean" {
-    # 200MB of zeros gzips to ~200KB but expands past clamd's MaxFileSize (100M)
-    local archive="${BATS_TEST_TMPDIR}/oversized.gz"
-    python3 - "$archive" <<'EOF'
-import gzip, sys
-with gzip.open(sys.argv[1], "wb") as f:
-    chunk = b"\0" * (1 << 20)
-    for _ in range(200):
-        f.write(chunk)
-EOF
-
-    local resp
-    resp=$(curl -4 -s -X POST \
-        -H "Authorization: Bearer ${AUTH_TOKEN}" \
-        -F "file=@${archive};filename=oversized.gz" \
-        "${API_URL}/api/v1/scan")
+    resp=$(scan_on_vm "$E2E_VM2_IP" "$eicar" eicar.com)
     assert_json_field "$resp" '.status' 'infected'
-    assert_json_field "$resp" '.signature | startswith("Heuristics.Limits.Exceeded")' 'true'
+    assert_json_field "$resp" '.engine' "$E2E_VM2_ENGINE"
+    assert_json_field "$resp" '.signature | length > 0' 'true'
 }
 
 @test "gateway load-balances across both VMs" {
