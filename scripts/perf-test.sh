@@ -100,7 +100,10 @@ results=()
 printf "%6s %9s %8s %8s %7s %9s %8s %5s\n" rate achieved p50_ms p95_ms failed mismatch dropped cpu
 for rate in $PERF_RATES; do
     before=$(cpu_sample)
-    line=$(RATE="$rate" k6 run -q --no-color "${PROJECT_ROOT}/test/perf/sweep.js" | grep '^{"rate"')
+    line=$(RATE="$rate" k6 run -q --no-color "${PROJECT_ROOT}/test/perf/sweep.js" | grep '^{"rate"') || {
+        echo "ERROR: k6 produced no result at ${rate}/s (see k6 output above)"
+        exit 1
+    }
     cpu=$(cpu_pct "$before" "$(cpu_sample)")
     line=$(echo "$line" | jq -c --argjson cpu "$cpu" '. + {cpu: $cpu}')
     results+=("$line")

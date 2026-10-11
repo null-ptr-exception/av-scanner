@@ -172,12 +172,15 @@ func (d *ClamAVDriver) ManualScan(filePath string) (*ScanResult, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	// Checked first: a killed process also returns an *exec.ExitError (code -1)
+	if ctx.Err() == context.DeadlineExceeded {
+		d.logger.Warn("Scanner timed out", "timeoutMs", d.config.Timeout)
+		return nil, ctx.Err()
+	}
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			return nil, ctx.Err()
 		} else {
 			return nil, err
 		}
