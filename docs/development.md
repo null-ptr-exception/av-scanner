@@ -22,7 +22,7 @@ make test-unit      # Go unit tests
 make test-helm      # Helm lint + unittest
 make test-molecule  # Molecule tests inside controller pod (requires: make deploy)
 make test-e2e       # BATS e2e tests (requires: make env)
-make test-perf      # k6 load tests
+make test-perf      # k6 load test against one VM (see Performance testing)
 ```
 
 | Test | What it covers |
@@ -67,6 +67,18 @@ To build the Trend Micro VM (once per host), from a checkout that CI does not wi
 2. Run the agent install script from the Trend Micro console on it. Never commit that script: it holds the tenant's activation token.
 3. In the console, make sure the endpoint uses a policy with Anti-Malware on and "Allow agent to trigger or cancel a manual scan" enabled (Anti-Malware → General). Otherwise `dsa_scan` exits 251 or 249.
 4. When `sudo /opt/ds_agent/dsa_scan --target <file> --json` exits 0, snapshot it: `source scripts/lib/virsh.sh && virsh_snapshot_create e2e-tm tm-base`.
+
+### Performance testing
+
+`scripts/perf-test.sh` runs k6 from this host against one VM, with 1 MB zips (clean or with EICAR):
+
+```bash
+make test-perf                                    # load: 5 clean + 2 EICAR users for 30s, on e2e-1
+make test-perf PERF_MODE=sweep                    # fixed scans/s steps until p95 > 5s; prints the max rate with p95 <= 1s
+make test-perf PERF_MODE=sweep PERF_VM=e2e-tm     # the same against the Trend Micro VM
+```
+
+Each step also reports the VM's CPU use. Set `AUTH_TOKEN` when the VM has auth enabled (the e2e deploy does; `make deploy` does not). `PERF_RATES` and `PERF_P95_MS` change the steps and the latency limit. `PERF_SSH_KEY` sets the key for CPU sampling when the VM was built with another key. Steps where k6 dropped requests never count toward the reported maximum. Needs `k6`, `python3` and `jq`.
 
 ### Debugging a failed e2e run
 

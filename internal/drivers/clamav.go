@@ -107,55 +107,10 @@ func (d *ClamAVDriver) Config() config.DriverConfig {
 	return d.config
 }
 
+// RTSWatch waits up to opts.Timeout for the real-time scanner to report
+// filePath. No detection is ErrNoRTSDetection, never clean.
 func (d *ClamAVDriver) RTSWatch(filePath string, opts WatchOptions) (*ScanResult, error) {
-	startTime := time.Now()
-	fileID := filepath.Base(filePath)
-
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		absPath = filePath
-	}
-
-	timeout := time.After(opts.Timeout)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			d.logger.Warn("RTS watch timeout", "filePath", filePath)
-			return &ScanResult{
-				Status:    StatusClean,
-				Engine:    d.Engine(),
-				Phase:     PhaseRTS,
-				FilePath:  filePath,
-				FileID:    fileID,
-				Timestamp: time.Now(),
-				Duration:  time.Since(startTime).Milliseconds(),
-				Raw:       map[string]bool{"timeout": true},
-			}, nil
-
-		case <-ticker.C:
-			if cached, found := d.cache.Get(absPath); found {
-				status := StatusClean
-				if cached.Status == "infected" {
-					status = StatusInfected
-				}
-
-				return &ScanResult{
-					Status:    status,
-					Engine:    d.Engine(),
-					Signature: cached.Signature,
-					Phase:     PhaseRTS,
-					FilePath:  filePath,
-					FileID:    fileID,
-					Timestamp: time.Now(),
-					Duration:  time.Since(startTime).Milliseconds(),
-					Raw:       map[string]string{"logEntry": cached.Raw},
-				}, nil
-			}
-		}
-	}
+	return WatchRTS(d.cache, d.Engine(), filePath, opts)
 }
 
 func (d *ClamAVDriver) ManualScan(filePath string) (*ScanResult, error) {
@@ -172,12 +127,15 @@ func (d *ClamAVDriver) ManualScan(filePath string) (*ScanResult, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	// Checked first: a killed process also returns an *exec.ExitError (code -1)
+	if ctx.Err() == context.DeadlineExceeded {
+		d.logger.Warn("Scanner timed out", "timeoutMs", d.config.Timeout)
+		return nil, ctx.Err()
+	}
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			return nil, ctx.Err()
 		} else {
 			return nil, err
 		}

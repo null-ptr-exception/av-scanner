@@ -172,5 +172,5 @@ test-e2e: ## Run BATS e2e tests (requires: make env)
 	bats --formatter tap --report-formatter junit --output test-results \
 		--print-output-on-failure --show-output-of-passing-tests --verbose-run -x test/e2e/
 
-test-perf: ## Run k6 load tests
-	./scripts/perf-test.sh
+test-perf: ## Run k6 load test (PERF_MODE=sweep for max scans/s; PERF_VM=<vm>)
+	./scripts/perf-test.sh $(PERF_MODE)

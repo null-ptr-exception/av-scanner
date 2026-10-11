@@ -1,264 +1,121 @@
 #!/bin/bash
 #
-# perf-test.sh - Run k6 load tests against av-scanner VM and report Prometheus metrics
+# perf-test.sh - k6 load test against one av-scanner VM
 #
-# Generates test data files locally, runs k6 on the host, then queries
-# Prometheus for VM resource usage during the test window.
+# Modes:
+#   load   (default) 5 clean + 2 EICAR virtual users for 30s (test/perf/loadtest.js)
+#   sweep  fixed arrival rates (scans/s) in steps until p95 > 5s or >5% failures
+#          (test/perf/sweep.js); reports the highest rate with p95 <= PERF_P95_MS
+#
+# Files: 1MB zips, clean or with EICAR. Each step also reports the VM's CPU use.
 #
 # Prerequisites:
-#   - VM running with av-scanner deployed (make deploy)
-#   - k6 installed (go install go.k6.io/k6@latest)
-#   - Prometheus running (optional, for metrics report)
+#   - av-scanner deployed on the VM (make env && make deploy)
+#   - k6 and python3 on this host
 #
 # Usage:
-#   ./scripts/perf-test.sh
+#   ./scripts/perf-test.sh [load|sweep]
 #
+# Environment:
+#   PERF_VM       libvirt VM to test (default: e2e-1; e.g. $E2E_TM_VM for Trend Micro)
+#   PERF_RATES    sweep rates in scans/s (default: "1 2 4 8 16 32 64 128")
+#   PERF_P95_MS   latency limit for the sweep result (default: 1000)
+#   AUTH_TOKEN    bearer token, if the VM has auth enabled
+#   PERF_SSH_KEY  key for the VM's CPU sampling (default: .vms/id_ed25519)
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-DATA_DIR="/tmp/k6-perf-data"
-PROM_URL="http://localhost:${PROM_PORT:-31090}"
+source "$SCRIPT_DIR/lib/virsh.sh"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m'
+MODE="${1:-load}"
+PERF_VM="${PERF_VM:-e2e-1}"
+PERF_RATES="${PERF_RATES:-1 2 4 8 16 32 64 128}"
+PERF_P95_MS="${PERF_P95_MS:-1000}"
+SSH_KEY="${PERF_SSH_KEY:-${PROJECT_ROOT}/.vms/id_ed25519}"
 
-log_info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-log_header(){ echo -e "\n${BOLD}$1${NC}"; }
+case "$MODE" in
+    load|sweep) ;;
+    *) echo "Usage: $0 [load|sweep]"; exit 1 ;;
+esac
 
-# ============================================
-# Preflight
-# ============================================
+for cmd in k6 python3 jq; do
+    command -v "$cmd" >/dev/null || { echo "ERROR: $cmd not found"; exit 1; }
+done
 
-preflight() {
-    log_header "=== Preflight Checks ==="
+VM_IP=$(virsh_get_ip "$PERF_VM")
+if [[ -z "$VM_IP" ]]; then
+    echo "ERROR: VM '$PERF_VM' not running. Run: make env && make deploy"
+    exit 1
+fi
+API_URL="http://${VM_IP}:3000"
+curl -sf --connect-timeout 3 "${API_URL}/api/v1/live" >/dev/null || {
+    echo "ERROR: av-scanner not reachable at ${API_URL}"
+    exit 1
+}
 
-    # k6
-    if ! command -v k6 &>/dev/null; then
-        log_error "k6 not found. Install: go install go.k6.io/k6@latest"
+# Under the project, not /tmp: a snap-packaged k6 has a private /tmp
+mkdir -p "${PROJECT_ROOT}/test-results"
+DATA_DIR=$(mktemp -d "${PROJECT_ROOT}/test-results/perf-data.XXXXXX")
+trap 'rm -rf "$DATA_DIR"' EXIT
+
+# EICAR is stored with 'O' replaced by 'x' and fixed at runtime (see CLAUDE.md)
+echo 'X5x!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | sed 's/x/O/' \
+    | python3 -c '
+import os, sys, zipfile
+eicar = sys.stdin.buffer.read().rstrip(b"\n")
+rnd = os.urandom(1 << 20)
+d = sys.argv[1]
+with zipfile.ZipFile(f"{d}/clean.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("random.dat", rnd)
+with zipfile.ZipFile(f"{d}/eicar.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("eicar.com", eicar)
+    z.writestr("random.dat", rnd)
+' "$DATA_DIR"
+
+# VM CPU counters: "<busy> <total>" jiffies from /proc/stat
+cpu_sample() {
+    # -n: never read stdin, which may be the caller's script
+    ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        -o ConnectTimeout=5 -i "$SSH_KEY" "ubuntu@${VM_IP}" \
+        "awk '/^cpu /{print \$2+\$3+\$4+\$7+\$8, \$2+\$3+\$4+\$5+\$6+\$7+\$8}' /proc/stat"
+}
+
+cpu_pct() {
+    awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, " "); split(b, y, " ");
+        printf "%.0f", 100 * (y[1] - x[1]) / (y[2] - x[2]) }'
+}
+
+export API_URL DATA_DIR AUTH_TOKEN="${AUTH_TOKEN:-}"
+echo "Target: ${PERF_VM} (${API_URL}), mode: ${MODE}"
+
+if [[ "$MODE" == "load" ]]; then
+    before=$(cpu_sample)
+    k6 run "${PROJECT_ROOT}/test/perf/loadtest.js"
+    echo "VM CPU during test: $(cpu_pct "$before" "$(cpu_sample)")%"
+    exit 0
+fi
+
+results=()
+printf "%6s %9s %8s %8s %7s %9s %8s %5s\n" rate achieved p50_ms p95_ms failed mismatch dropped cpu
+for rate in $PERF_RATES; do
+    before=$(cpu_sample)
+    line=$(RATE="$rate" k6 run -q --no-color "${PROJECT_ROOT}/test/perf/sweep.js" | grep '^{"rate"') || {
+        echo "ERROR: k6 produced no result at ${rate}/s (see k6 output above)"
         exit 1
-    fi
-    log_ok "k6 $(k6 version 2>&1 | head -1)"
+    }
+    cpu=$(cpu_pct "$before" "$(cpu_sample)")
+    line=$(echo "$line" | jq -c --argjson cpu "$cpu" '. + {cpu: $cpu}')
+    results+=("$line")
+    echo "$line" | jq -r '[.rate, (.achieved*100|round/100), (.p50|round), (.p95|round),
+        "\(.failed*100|round)%", .mismatches, .dropped, "\(.cpu)%"] | @tsv' \
+        | awk -F'\t' '{printf "%6s %9s %8s %8s %7s %9s %8s %5s\n", $1, $2, $3, $4, $5, $6, $7, $8}'
+    echo "$line" | jq -e '.p95 > 5000 or .failed > 0.05' >/dev/null && break
+    sleep 10
+done
 
-    # VM discovery via virsh
-    source "$SCRIPT_DIR/lib/virsh.sh"
-    VM_IP=$(virsh_get_ip "av-scanner")
-    if [[ -z "$VM_IP" ]]; then
-        log_error "VM 'av-scanner' not running. Run 'make vm-init && make deploy' first."
-        exit 1
-    fi
-    export VM_IP
-    export API_URL="http://${VM_IP}:3000"
-
-    if ! curl -sf --connect-timeout 3 "${API_URL}/api/v1/live" >/dev/null; then
-        log_error "av-scanner not reachable at ${API_URL}"
-        exit 1
-    fi
-    log_ok "av-scanner reachable at ${API_URL}"
-
-    # Prometheus (optional)
-    if curl -sf --connect-timeout 3 "${PROM_URL}/-/ready" >/dev/null; then
-        log_ok "Prometheus reachable at ${PROM_URL}"
-        HAS_PROM=true
-    else
-        log_warn "Prometheus not reachable at ${PROM_URL} — metrics report will be skipped"
-        HAS_PROM=false
-    fi
-}
-
-# ============================================
-# Generate test data
-# ============================================
-
-generate_test_data() {
-    log_header "=== Generating Test Data ==="
-
-    mkdir -p "$DATA_DIR"
-
-    # Clean zip: ~1MB of random data in a zip
-    dd if=/dev/urandom bs=1M count=1 of="${DATA_DIR}/random.dat"
-    (cd "${DATA_DIR}" && zip -j clean.zip random.dat) >/dev/null
-
-    # Eicar zip: EICAR + padding in a zip (~1MB compressed)
-    # ClamAV only detects EICAR as exactly 68 bytes, so we embed it in a zip with padding.
-    local eicar_hex="58354f2150254041505b345c505a58353428505e2937434329377d2445494341522d5354414e444152442d414e544956495255532d544553542d46494c452124482b482a"
-    echo "$eicar_hex" | xxd -r -p > "${DATA_DIR}/eicar.com"
-    (cd "${DATA_DIR}" && zip -j eicar.zip eicar.com random.dat) >/dev/null
-
-    rm -f "${DATA_DIR}/random.dat" "${DATA_DIR}/eicar.com"
-
-    log_ok "Test data:"
-    ls -lh "${DATA_DIR}"/*.zip | awk '{print "  " $5 "  " $NF}'
-}
-
-# ============================================
-# Run k6
-# ============================================
-
-run_k6() {
-    log_header "=== Running k6 Load Test ==="
-    log_info "Target: ${API_URL}"
-
-    LOAD_TEST_START=$(date +%s)
-
-    set +e
-    k6 run "${PROJECT_ROOT}/test/perf/loadtest.js" 2>&1 | tee /tmp/k6-output.log
-    K6_EXIT=$?
-    set -e
-
-    LOAD_TEST_END=$(date +%s)
-    local elapsed=$((LOAD_TEST_END - LOAD_TEST_START))
-
-    if [[ $K6_EXIT -eq 0 ]]; then
-        log_ok "k6 completed in ${elapsed}s"
-    else
-        log_error "k6 exited with code ${K6_EXIT} after ${elapsed}s"
-        return 1
-    fi
-}
-
-# ============================================
-# Prometheus report
-# ============================================
-
-prom_query() {
-    local query="$1"
-    curl -s --data-urlencode "query=${query}" "${PROM_URL}/api/v1/query" \
-        | python3 -c "
-import json, sys
-r = json.load(sys.stdin)
-if r['status'] != 'success' or not r['data']['result']:
-    print('N/A')
-else:
-    print(r['data']['result'][0]['value'][1])
-" || echo "N/A"
-}
-
-prom_query_multi() {
-    local query="$1"
-    curl -s --data-urlencode "query=${query}" "${PROM_URL}/api/v1/query" \
-        | python3 -c "
-import json, sys
-r = json.load(sys.stdin)
-if r['status'] != 'success': sys.exit(0)
-for m in r['data']['result']:
-    labels = ', '.join(f'{k}={v}' for k,v in m['metric'].items() if k != '__name__')
-    val = m['value'][1]
-    print(f'    {labels}: {val}')
-"
-}
-
-show_prometheus_report() {
-    if [[ "$HAS_PROM" != "true" ]]; then
-        return
-    fi
-
-    local duration=$((LOAD_TEST_END - LOAD_TEST_START))
-    local range="${duration}s"
-    [[ $duration -lt 60 ]] && range="60s"
-
-    log_header "=== VM Resource Usage (during load test) ==="
-
-    echo -e "\n${BOLD}CPU${NC}"
-    local cpu
-    cpu=$(prom_query "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[${range}])))")
-    [[ "$cpu" != "N/A" ]] && printf "  Usage: %.1f%%\n" "$cpu" || echo "  N/A"
-
-    echo -e "\n${BOLD}Memory${NC}"
-    local mem_total mem_avail mem_used_pct
-    mem_total=$(prom_query "node_memory_MemTotal_bytes")
-    mem_avail=$(prom_query "node_memory_MemAvailable_bytes")
-    mem_used_pct=$(prom_query "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)")
-    if [[ "$mem_total" != "N/A" ]]; then
-        printf "  Total:     %.1f GB\n" "$(echo "$mem_total / 1073741824" | bc -l)"
-        printf "  Available: %.1f GB\n" "$(echo "$mem_avail / 1073741824" | bc -l)"
-        printf "  Used:      %.1f%%\n" "$mem_used_pct"
-    fi
-
-    echo -e "\n${BOLD}Disk I/O${NC}"
-    local disk_read disk_write
-    disk_read=$(prom_query "rate(node_disk_read_bytes_total{device=\"sda\"}[${range}])")
-    disk_write=$(prom_query "rate(node_disk_written_bytes_total{device=\"sda\"}[${range}])")
-    if [[ "$disk_read" != "N/A" ]]; then
-        printf "  sda read:  %.1f KB/s\n" "$(echo "$disk_read / 1024" | bc -l)"
-        printf "  sda write: %.1f KB/s\n" "$(echo "$disk_write / 1024" | bc -l)"
-    else
-        echo "  N/A"
-    fi
-
-    echo -e "\n${BOLD}Network I/O${NC}"
-    local net_rx net_tx
-    net_rx=$(prom_query "rate(node_network_receive_bytes_total{device=\"ens3\"}[${range}])")
-    net_tx=$(prom_query "rate(node_network_transmit_bytes_total{device=\"ens3\"}[${range}])")
-    if [[ "$net_rx" != "N/A" ]]; then
-        printf "  ens3 rx: %.1f KB/s\n" "$(echo "$net_rx / 1024" | bc -l)"
-        printf "  ens3 tx: %.1f KB/s\n" "$(echo "$net_tx / 1024" | bc -l)"
-    else
-        echo "  N/A"
-    fi
-
-    log_header "=== av-scanner API Metrics (during load test) ==="
-
-    echo -e "\n${BOLD}Request Rate${NC}"
-    local total_rps
-    total_rps=$(prom_query "sum(rate(av_http_requests_total{endpoint=\"/api/v1/scan\"}[${range}]))")
-    [[ "$total_rps" != "N/A" ]] && printf "  Scan RPS: %.1f req/s\n" "$total_rps" || echo "  N/A"
-
-    echo -e "\n${BOLD}Error Rate${NC}"
-    local err_rate
-    err_rate=$(prom_query "sum(rate(av_http_requests_total{endpoint=\"/api/v1/scan\",status_code!=\"200\"}[${range}])) / sum(rate(av_http_requests_total{endpoint=\"/api/v1/scan\"}[${range}])) * 100")
-    [[ "$err_rate" != "N/A" ]] && printf "  Scan errors: %.2f%%\n" "$err_rate" || echo "  Scan errors: 0.00%"
-
-    echo -e "\n${BOLD}Server-side Latency (p95)${NC}"
-    local p95
-    p95=$(prom_query "histogram_quantile(0.95, sum(rate(av_http_request_duration_seconds_bucket{endpoint=\"/api/v1/scan\"}[${range}])) by (le))")
-    [[ "$p95" != "N/A" ]] && printf "  Scan p95: %.0f ms\n" "$(echo "$p95 * 1000" | bc -l)" || echo "  N/A"
-
-    echo -e "\n${BOLD}Scan Results${NC}"
-    prom_query_multi "increase(av_scans_total[${range}])"
-
-    echo ""
-}
-
-# ============================================
-# Cleanup
-# ============================================
-
-cleanup() {
-    rm -rf "$DATA_DIR"
-}
-
-# ============================================
-# Main
-# ============================================
-
-main() {
-    echo ""
-    echo "============================================"
-    echo "  av-scanner Performance Test"
-    echo "============================================"
-
-    preflight
-    generate_test_data
-
-    if ! run_k6; then
-        cleanup
-        exit 1
-    fi
-
-    show_prometheus_report
-    cleanup
-
-    log_ok "Performance test complete"
-}
-
-main "$@"
+printf '%s\n' "${results[@]}" | jq -rs --argjson lim "$PERF_P95_MS" '
+    map(select(.p95 <= $lim and .failed == 0 and .mismatches == 0 and .dropped == 0)) | max_by(.achieved)
+    | if . then "Saturation (p95 <= \($lim)ms, no errors or drops): \(.achieved*100|round/100) scans/s at offered \(.rate)/s, p95 \(.p95|round)ms, VM CPU \(.cpu)%"
+      else "No rate met p95 <= \($lim)ms without errors" end'

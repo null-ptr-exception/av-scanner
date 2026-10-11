@@ -47,8 +47,17 @@ func (d *MockDriver) Start() error {
 func (d *MockDriver) Stop() {
 }
 
+// RTSWatch reports an EICAR file as a real-time detection. Anything else is
+// ErrNoRTSDetection, as with the real drivers: no detection is never clean.
 func (d *MockDriver) RTSWatch(filePath string, opts WatchOptions) (*ScanResult, error) {
-	return d.scan(filePath, PhaseRTS)
+	result, err := d.scan(filePath, PhaseRTS)
+	if err != nil {
+		return nil, err
+	}
+	if result.Status != StatusInfected {
+		return nil, ErrNoRTSDetection
+	}
+	return result, nil
 }
 
 func (d *MockDriver) ManualScan(filePath string) (*ScanResult, error) {

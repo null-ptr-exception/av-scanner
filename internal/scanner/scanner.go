@@ -108,31 +108,26 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 		signature = result.Signature
 		phase = drivers.PhaseManual
 	} else {
-		// 2. Manual scan failed (file missing = RTS quarantined it)
-		// Wait for RTS cache with timeout proportional to file size
-		driverCfg := driver.Config()
-		s.logger.Debug("Manual scan failed, waiting for RTS cache", "error", err, "fileId", fileID)
-		retryDelay := 20 * time.Millisecond
-		baseDelay := time.Duration(driverCfg.RTSCacheBaseDelay) * time.Millisecond
-		delayPerMB := time.Duration(driverCfg.RTSCacheDelayPerMB) * time.Millisecond
-		maxWait := baseDelay + time.Duration(size/1024/1024)*delayPerMB
-		waited := time.Duration(0)
-		for waited < maxWait {
-			if cached, found := s.detectionCache.Get(absPath); found && cached.Status == "infected" {
-				s.logger.Info("File detected by RTS",
-					"fileId", fileID,
-					"signature", cached.Signature,
-					"waitedMs", waited.Milliseconds(),
-				)
-				finalStatus = drivers.StatusInfected
-				signature = cached.Signature
-				phase = drivers.PhaseRTS
-				break
-			}
-			time.Sleep(retryDelay)
-			waited += retryDelay
+		// 2. No verdict from the manual scan (e.g. the real-time scanner already
+		// quarantined the file). Wait for the real-time detection for the rest
+		// of the scan's time budget; it arrives as soon as the engine logs it.
+		budget := time.Duration(driver.Config().Timeout) * time.Millisecond
+		remaining := time.Until(startTime.Add(budget))
+		if remaining < 0 {
+			remaining = 0
 		}
-		// If still not found in cache, check why
+		s.logger.Debug("No manual verdict, waiting for RTS detection", "error", err, "fileId", fileID, "waitMs", remaining.Milliseconds())
+		if rts, rtsErr := driver.RTSWatch(filePath, drivers.WatchOptions{Timeout: remaining}); rtsErr == nil && rts.Status == drivers.StatusInfected {
+			s.logger.Info("File detected by RTS",
+				"fileId", fileID,
+				"signature", rts.Signature,
+				"waitedMs", rts.Duration,
+			)
+			finalStatus = drivers.StatusInfected
+			signature = rts.Signature
+			phase = drivers.PhaseRTS
+		}
+		// No detection within the budget: an error, never clean
 		if finalStatus == "" {
 			fileExists := true
 			if _, statErr := os.Stat(filePath); os.IsNotExist(statErr) {
@@ -144,11 +139,14 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 				s.logger.Error("POTENTIAL LOG PARSING ISSUE: file disappeared but no RTS detection found",
 					"fileId", fileID,
 					"filePath", absPath,
-					"waitedMs", waited.Milliseconds(),
+					"waitedMs", remaining.Milliseconds(),
 					"hint", "check if RTS log format matches expected pattern",
 				)
 			}
 
+			if fileExists {
+				return nil, fmt.Errorf("scan failed: scanner returned no verdict and no RTS detection found")
+			}
 			return nil, fmt.Errorf("scan failed: file not accessible and no RTS detection found")
 		}
 	}

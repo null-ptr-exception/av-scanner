@@ -62,76 +62,148 @@ func TestTmVirusFoundRegex(t *testing.T) {
 func TestParseManualScanOutput(t *testing.T) {
 	d := NewTrendMicroDriver(config.DriverConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 
+	// Captured from agent 20.0.3 with --json --log /dev/stderr (result = stderr,
+	// diag = stdout). With the agent stopped, dsa_scan exits 253 and still
+	// reports "errorCode":0.
+	const (
+		realClean = `{
+  "traceID":"6bbebfb8-516b-4ac7-9dc0-f292dbceff66",
+  "numOfFileScanned":1,
+  "numOfFileSkipped":0,
+  "numOfFileInfected":0,
+  "timeElapse":0.48,
+  "errorCode":0,
+  "infectedFiles":[]
+}
+`
+		realUnreachable = `{
+  "traceID":"c3c338b6-9fcd-4bf8-86cb-aa4f2409939e",
+  "numOfFileScanned":0,
+  "numOfFileSkipped":0,
+  "numOfFileInfected":0,
+  "timeElapse":0.01,
+  "errorCode":0,
+  "infectedFiles":[]
+}
+
+`
+		realUnreachableDiag = "2026-10-11 12:09:47.000000 [+0000]: [Error/1] | couldn't connect to 127.0.0.1:4118 (-1: Socket reset) | dsa/core/http/HTTPClient.cpp:332:ConnectToHost | AA7:7FF2975A8640:CScriptThread\n" +
+			"2026-10-11 12:09:47.666909 [+0000]: [Error/1] | Request failed, trace: c3c338b6-9fcd-4bf8-86cb-aa4f2409939e, batch: 1 | ...pace/build_dsa-core_master/dsa/core/scripts/dsa_scan.lua:660:(null) | AA7:7FF2975A8640:CScriptThread"
+	)
+
 	tests := []struct {
 		name          string
-		output        string
+		result        string
 		exitCode      int
+		diag          string
 		wantStatus    ScanStatus
 		wantSignature string
 	}{
 		{
-			name:       "scanned clean",
-			output:     `{"traceID":"t","numOfFileScanned":1,"numOfFileSkipped":0,"numOfFileInfected":0,"errorCode":0,"infectedFiles":[]}`,
+			name:       "real agent: clean",
+			result:     realClean,
 			wantStatus: StatusClean,
 		},
 		{
+			name:       "real agent: unreachable (exit 253, errorCode 0) is error",
+			result:     realUnreachable,
+			exitCode:   253,
+			diag:       realUnreachableDiag,
+			wantStatus: StatusError,
+		},
+		{
+			// Regression: the old parser read stdout, failed on the log lines and
+			// matched "infected" in the field name numOfFileInfected
+			name:       "result missing while diag mentions numOfFileInfected is error, not infected",
+			result:     "",
+			exitCode:   253,
+			diag:       realUnreachableDiag + "\n" + realUnreachable,
+			wantStatus: StatusError,
+		},
+		{
 			name:          "infected",
-			output:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":0,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			result:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":0,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			exitCode:      1,
 			wantStatus:    StatusInfected,
 			wantSignature: "Eicar_test_file",
 		},
 		{
 			name:          "infected with errorCode is still infected",
-			output:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":5,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			result:        `{"numOfFileScanned":1,"numOfFileInfected":1,"errorCode":5,"infectedFiles":[{"fileName":"/tmp/x","malwareName":"Eicar_test_file"}]}`,
+			exitCode:      1,
 			wantStatus:    StatusInfected,
 			wantSignature: "Eicar_test_file",
 		},
 		{
-			name:       "non-zero errorCode is error",
-			output:     `{"numOfFileScanned":1,"numOfFileInfected":0,"errorCode":5}`,
+			name:       "exit 1 (malware found) without a name is infected",
+			result:     `{"numOfFileScanned":1,"numOfFileInfected":0,"errorCode":0,"infectedFiles":[]}`,
+			exitCode:   1,
+			wantStatus: StatusInfected,
+		},
+		{
+			name:       "exit 3 (malware found, files skipped) is infected",
+			result:     `{"numOfFileScanned":1,"numOfFileSkipped":1,"numOfFileInfected":0,"errorCode":0}`,
+			exitCode:   3,
+			wantStatus: StatusInfected,
+		},
+		{
+			name:       "exit 2 (files skipped) is error",
+			result:     `{"numOfFileScanned":0,"numOfFileSkipped":1,"errorCode":0}`,
+			exitCode:   2,
 			wantStatus: StatusError,
 		},
 		{
-			name:       "skipped is error",
-			output:     `{"numOfFileScanned":0,"numOfFileSkipped":1,"errorCode":0}`,
+			name:       "exit 248 (busy) with clean-looking JSON is error",
+			result:     realClean,
+			exitCode:   248,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "exit 249 (not permitted) is error",
+			result:     realUnreachable,
+			exitCode:   249,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "non-zero errorCode is error",
+			result:     `{"numOfFileScanned":1,"numOfFileInfected":0,"errorCode":5}`,
 			wantStatus: StatusError,
 		},
 		{
 			name:       "skipped alongside scanned is error",
-			output:     `{"numOfFileScanned":1,"numOfFileSkipped":1,"errorCode":0}`,
+			result:     `{"numOfFileScanned":1,"numOfFileSkipped":1,"errorCode":0}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "clean-looking result missing fields is error",
+			result:     `{"numOfFileScanned":1}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "clean-looking result missing errorCode is error",
+			result:     `{"numOfFileScanned":1,"numOfFileSkipped":0,"numOfFileInfected":0}`,
 			wantStatus: StatusError,
 		},
 		{
 			name:       "nothing scanned is error",
-			output:     `{}`,
+			result:     `{}`,
 			wantStatus: StatusError,
 		},
 		{
-			name:       "unparseable output with exit 0 is error",
-			output:     "Scan finished",
+			name:       "empty result is error",
+			result:     "",
 			wantStatus: StatusError,
 		},
 		{
-			name:       "empty output with exit 0 is error",
-			output:     "",
+			name:       "unparseable result mentioning malware is error",
+			result:     "Malware detected: Eicar_test_file",
 			wantStatus: StatusError,
-		},
-		{
-			name:       "unparseable output with non-zero exit is error",
-			output:     "dsa_scan: connection refused",
-			exitCode:   1,
-			wantStatus: StatusError,
-		},
-		{
-			name:       "unparseable output mentioning malware is infected",
-			output:     "Malware detected: Eicar_test_file",
-			wantStatus: StatusInfected,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, signature := d.parseManualScanOutput(tt.output, tt.exitCode)
+			status, signature := d.parseManualScanOutput(tt.result, tt.exitCode, tt.diag)
 			if status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", status, tt.wantStatus)
 			}

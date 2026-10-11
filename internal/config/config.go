@@ -15,12 +15,10 @@ const (
 )
 
 type DriverConfig struct {
-	Engine            EngineType
-	RTSLogPath        string
-	ScanBinaryPath    string
-	Timeout           int // milliseconds
-	RTSCacheBaseDelay int // milliseconds - base delay when waiting for RTS cache
-	RTSCacheDelayPerMB int // milliseconds - additional delay per MB of file size
+	Engine         EngineType
+	RTSLogPath     string
+	ScanBinaryPath string
+	Timeout        int // milliseconds
 }
 
 type AuthConfig struct {
@@ -52,20 +50,16 @@ func Load() (*Config, error) {
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
 		Drivers: map[EngineType]DriverConfig{
 			EngineClamAV: {
-				Engine:             EngineClamAV,
-				RTSLogPath:         getEnv("CLAMAV_RTS_LOG_PATH", "/var/log/clamav/clamonacc.log"),
-				ScanBinaryPath:     getEnv("CLAMAV_SCAN_BINARY", "/usr/bin/clamdscan"),
-				Timeout:            getEnvInt("CLAMAV_TIMEOUT", 15000),
-				RTSCacheBaseDelay:  getEnvInt("CLAMAV_RTS_CACHE_BASE_DELAY", 500),
-				RTSCacheDelayPerMB: getEnvInt("CLAMAV_RTS_CACHE_DELAY_PER_MB", 10),
+				Engine:         EngineClamAV,
+				RTSLogPath:     getEnv("CLAMAV_RTS_LOG_PATH", "/var/log/clamav/clamonacc.log"),
+				ScanBinaryPath: getEnv("CLAMAV_SCAN_BINARY", "/usr/bin/clamdscan"),
+				Timeout:        getEnvInt("CLAMAV_TIMEOUT", 15000),
 			},
 			EngineTrendMicro: {
-				Engine:             EngineTrendMicro,
-				RTSLogPath:         getEnv("TM_RTS_LOG_PATH", "/var/opt/ds_agent/diag/ds_am.log"),
-				ScanBinaryPath:     getEnv("TM_SCAN_BINARY", "/opt/ds_agent/dsa_scan"),
-				Timeout:            getEnvInt("TM_TIMEOUT", 15000),
-				RTSCacheBaseDelay:  getEnvInt("TM_RTS_CACHE_BASE_DELAY", 500),
-				RTSCacheDelayPerMB: getEnvInt("TM_RTS_CACHE_DELAY_PER_MB", 10),
+				Engine:         EngineTrendMicro,
+				RTSLogPath:     getEnv("TM_RTS_LOG_PATH", "/var/opt/ds_agent/diag/ds_am.log"),
+				ScanBinaryPath: getEnv("TM_SCAN_BINARY", "/opt/ds_agent/dsa_scan"),
+				Timeout:        getEnvInt("TM_TIMEOUT", 15000),
 			},
 		},
 		Auth: AuthConfig{

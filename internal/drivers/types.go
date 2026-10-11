@@ -49,8 +49,7 @@ type EngineInfo struct {
 }
 
 type WatchOptions struct {
-	Timeout      time.Duration
-	PollInterval time.Duration
+	Timeout time.Duration
 }
 
 type LogEntry struct {
@@ -66,6 +65,8 @@ type Driver interface {
 	Config() config.DriverConfig
 	Start() error
 	Stop()
+	// RTSWatch waits up to opts.Timeout for a real-time detection of filePath.
+	// It returns an infected result, or ErrNoRTSDetection; never clean.
 	RTSWatch(filePath string, opts WatchOptions) (*ScanResult, error)
 	ManualScan(filePath string) (*ScanResult, error)
 	CheckHealth() (*EngineHealth, error)

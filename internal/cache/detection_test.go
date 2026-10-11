@@ -224,3 +224,36 @@ func TestDetectionCache_OverwriteExisting(t *testing.T) {
 		t.Errorf("expected overwritten detection, got status=%s signature=%s", cached.Status, cached.Signature)
 	}
 }
+
+func TestDetectionCache_WaitReturnsLateDetection(t *testing.T) {
+	c := NewDetectionCache(time.Minute)
+	defer c.Stop()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		c.Add("/tmp/other", &Detection{Status: "infected"})
+		time.Sleep(50 * time.Millisecond)
+		c.Add("/tmp/late", &Detection{Status: "infected", Signature: "sig"})
+	}()
+
+	d, found := c.Wait("/tmp/late", time.Second)
+	if !found || d.Signature != "sig" {
+		t.Fatalf("expected late detection, got %v %v", d, found)
+	}
+	if _, found := c.Peek("/tmp/late"); found {
+		t.Error("expected Wait to remove the detection")
+	}
+}
+
+func TestDetectionCache_WaitTimesOut(t *testing.T) {
+	c := NewDetectionCache(time.Minute)
+	defer c.Stop()
+
+	start := time.Now()
+	if _, found := c.Wait("/tmp/none", 100*time.Millisecond); found {
+		t.Fatal("expected no detection")
+	}
+	if elapsed := time.Since(start); elapsed < 90*time.Millisecond {
+		t.Errorf("returned too early: %v", elapsed)
+	}
+}
