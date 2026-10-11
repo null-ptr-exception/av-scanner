@@ -109,6 +109,12 @@ jobs:
           path: test-results/*.xml
           reporter: java-junit
 
+      # Agent billing runs while the VM is on. On failure it stays up for debugging;
+      # the next run reverts it to tm-base either way.
+      - name: Shut down Trend Micro VM
+        if: success()
+        run: ./scripts/tm-vm.sh stop
+
       - name: Cleanup
         if: always()
         run: |

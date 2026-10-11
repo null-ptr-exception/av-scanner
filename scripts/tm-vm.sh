@@ -6,6 +6,7 @@
 #   ./scripts/tm-vm.sh prepare            # wait for agent, authorize .vms key
 #   ./scripts/tm-vm.sh prepare --revert   # revert to tm-base snapshot first
 #   ./scripts/tm-vm.sh ip                 # print the VM's IP
+#   ./scripts/tm-vm.sh stop               # shut the VM down (agent billing stops while off)
 #
 # The VM is never created or destroyed by this repo: it needs a registered
 # Trend Micro agent (see docs/development.md). It may live outside this
@@ -85,8 +86,29 @@ cmd_prepare() {
     exit 1
 }
 
+cmd_stop() {
+    require_vm
+    if ! virsh_is_running "$TM_VM"; then
+        echo "# ${TM_VM} is not running"
+        return 0
+    fi
+    echo "# Shutting down ${TM_VM}..."
+    _virsh shutdown "$TM_VM"
+    local i
+    for i in $(seq 1 30); do
+        if ! virsh_is_running "$TM_VM"; then
+            echo "# ${TM_VM} shut off"
+            return 0
+        fi
+        sleep 2
+    done
+    echo "# ${TM_VM} did not shut down in 60s, forcing off"
+    _virsh destroy "$TM_VM"
+}
+
 case "${1:-}" in
     ip)      cmd_ip ;;
     prepare) shift; cmd_prepare "$@" ;;
-    *) echo "Usage: $0 {prepare [--revert]|ip}"; exit 1 ;;
+    stop)    cmd_stop ;;
+    *) echo "Usage: $0 {prepare [--revert]|ip|stop}"; exit 1 ;;
 esac
