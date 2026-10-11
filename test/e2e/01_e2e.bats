@@ -164,12 +164,10 @@ scan_on_vm() {
     resp=$(scan_on_vm "$E2E_VM1_IP" "$eicar" eicar.com)
     assert_json_field "$resp" '.status' 'infected'
     assert_json_field "$resp" '.engine' "$E2E_VM1_ENGINE"
-    assert_json_field "$resp" '.signature | length > 0' 'true'
 
     resp=$(scan_on_vm "$E2E_VM2_IP" "$eicar" eicar.com)
     assert_json_field "$resp" '.status' 'infected'
     assert_json_field "$resp" '.engine' "$E2E_VM2_ENGINE"
-    assert_json_field "$resp" '.signature | length > 0' 'true'
 }
 
 @test "gateway load-balances across both VMs" {

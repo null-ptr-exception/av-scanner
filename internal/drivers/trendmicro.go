@@ -247,6 +247,10 @@ func (d *TrendMicroDriver) parseManualScanOutput(output string, exitCode int) (S
 		if len(jsonResult.InfectedFiles) > 0 {
 			signature = jsonResult.InfectedFiles[0].MalwareName
 		}
+		if signature == "" {
+			d.logger.Warn("Infected without a malware name in scanner output",
+				"exitCode", exitCode, "output", output)
+		}
 		return StatusInfected, signature
 	}
 

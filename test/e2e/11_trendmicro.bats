@@ -13,7 +13,8 @@ setup_file() {
     fi
     e2e_vm_setup
     export KUBE_CONTEXT="av-scanner"
-    export TM_RTS_LOG_PATH="${TM_RTS_LOG_PATH:-/var/opt/ds_agent/diag/ds_am.log}"
+    # Nothing in e2e overrides tm_rts_log_path, so these tests verify the role default
+    export TM_RTS_LOG_PATH="/var/opt/ds_agent/diag/ds_am.log"
 }
 
 setup() {

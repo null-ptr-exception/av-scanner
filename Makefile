@@ -13,8 +13,7 @@ export GATEWAY_PORT KFA_PORT PROM_PORT
 # E2E_TM_SSH_KEY is the key that VM was built with.
 E2E_TM_VM ?=
 E2E_TM_SSH_KEY ?= $(CURDIR)/.vms/id_ed25519
-TM_RTS_LOG_PATH ?= /var/opt/ds_agent/diag/ds_am.log
-export E2E_TM_VM E2E_TM_SSH_KEY TM_RTS_LOG_PATH
+export E2E_TM_VM E2E_TM_SSH_KEY
 
 # e2e-1/e2e-2 are the ClamAV VMs that make env creates and make clean destroys
 ifneq ($(filter e2e-1 e2e-2,$(E2E_TM_VM)),)
@@ -74,8 +73,6 @@ env: ## Create VMs (ClamAV, or ClamAV + Trend Micro with E2E_TM_VM), minikube + 
 		"      value: \"$$VM2_IP\"" \
 		"    - name: AV_SCANNER_VM2_AV_ENGINE" \
 		"      value: $(VM2_ENGINE)" \
-		"    - name: AV_SCANNER_VM2_TM_RTS_LOG_PATH" \
-		"      value: $(TM_RTS_LOG_PATH)" \
 		"" \
 		"inventory: |" \
 		"  all:" \
@@ -92,7 +89,6 @@ env: ## Create VMs (ClamAV, or ClamAV + Trend Micro with E2E_TM_VM), minikube + 
 		"            ansible_host: $$VM2_IP" \
 		"            ansible_user: ubuntu" \
 		"            av_engine: $(VM2_ENGINE)" \
-		"            tm_rts_log_path: $(TM_RTS_LOG_PATH)" \
 		> skaffold-values.yaml; \
 	echo "  Generated skaffold-values.yaml"
 	# --- Istio ---

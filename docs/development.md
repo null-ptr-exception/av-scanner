@@ -60,7 +60,6 @@ The Trend Micro VM is never created or destroyed by `make`, CI or the tests, sin
 |----------|---------|---------|
 | `E2E_TM_VM` | (unset) | libvirt name of the Trend Micro VM; unset means ClamAV only |
 | `E2E_TM_SSH_KEY` | `.vms/id_ed25519` | Key the VM was built with, if it was built from another checkout |
-| `TM_RTS_LOG_PATH` | `/var/opt/ds_agent/diag/ds_am.log` | Agent log with RTS detections (agent 20.x) |
 
 To build the Trend Micro VM (once per host), from a checkout that CI does not wipe. It needs a Trend Vision One account with Server & Workload Protection (a trial works):
 
@@ -68,6 +67,10 @@ To build the Trend Micro VM (once per host), from a checkout that CI does not wi
 2. Run the agent install script from the Trend Micro console on it. Never commit that script: it holds the tenant's activation token.
 3. In the console, make sure the endpoint uses a policy with Anti-Malware on and "Allow agent to trigger or cancel a manual scan" enabled (Anti-Malware → General). Otherwise `dsa_scan` exits 251 or 249.
 4. When `sudo /opt/ds_agent/dsa_scan --target <file> --json` exits 0, snapshot it: `source scripts/lib/virsh.sh && virsh_snapshot_create e2e-tm tm-base`.
+
+### Debugging a failed e2e run
+
+`./scripts/e2e-logs.sh` prints the av-scanner journal and the engine logs from each e2e VM (clamd/clamonacc, or the Trend Micro agent's `ds_am.log`). CI runs it automatically when the e2e job fails, before the VMs are destroyed. Set `E2E_TM_VM` as for the tests.
 
 ### Running molecule interactively
 

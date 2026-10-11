@@ -63,7 +63,6 @@ inventory: |
             ansible_host: ${vm2_ip}
             ansible_user: ubuntu
             av_engine: ${E2E_VM2_ENGINE}
-            tm_rts_log_path: ${TM_RTS_LOG_PATH:-/var/opt/ds_agent/diag/ds_am.log}
 
 istio:
   enabled: true

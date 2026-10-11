@@ -100,11 +100,13 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 
 	var finalStatus drivers.ScanStatus
 	var signature string
+	var phase drivers.ScanPhase
 
 	if err == nil && (result.Status == drivers.StatusClean || result.Status == drivers.StatusInfected) {
 		// Manual scan completed successfully - use its result
 		finalStatus = result.Status
 		signature = result.Signature
+		phase = drivers.PhaseManual
 	} else {
 		// 2. Manual scan failed (file missing = RTS quarantined it)
 		// Wait for RTS cache with timeout proportional to file size
@@ -124,6 +126,7 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 				)
 				finalStatus = drivers.StatusInfected
 				signature = cached.Signature
+				phase = drivers.PhaseRTS
 				break
 			}
 			time.Sleep(retryDelay)
@@ -164,7 +167,10 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 
 	s.logger.Info("Scan completed",
 		"fileId", fileID,
+		"engine", response.Engine,
 		"status", response.Status,
+		"phase", phase,
+		"signature", signature,
 		"duration", response.TotalDuration,
 	)
 

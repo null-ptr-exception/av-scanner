@@ -60,8 +60,8 @@ func TestLoad_Defaults(t *testing.T) {
 
 	// Check TrendMicro driver defaults
 	tm := cfg.Drivers[EngineTrendMicro]
-	if tm.RTSLogPath != "/var/log/ds_agent/ds_agent.log" {
-		t.Errorf("expected TM RTSLogPath /var/log/ds_agent/ds_agent.log, got %s", tm.RTSLogPath)
+	if tm.RTSLogPath != "/var/opt/ds_agent/diag/ds_am.log" {
+		t.Errorf("expected TM RTSLogPath /var/opt/ds_agent/diag/ds_am.log, got %s", tm.RTSLogPath)
 	}
 	if tm.ScanBinaryPath != "/opt/ds_agent/dsa_scan" {
 		t.Errorf("expected TM ScanBinaryPath /opt/ds_agent/dsa_scan, got %s", tm.ScanBinaryPath)
