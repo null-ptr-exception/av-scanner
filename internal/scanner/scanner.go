@@ -149,6 +149,9 @@ func (s *Scanner) Scan(filePath, fileID, originalName string, size int64) (*Scan
 				)
 			}
 
+			if fileExists {
+				return nil, fmt.Errorf("scan failed: scanner returned no verdict and no RTS detection found")
+			}
 			return nil, fmt.Errorf("scan failed: file not accessible and no RTS detection found")
 		}
 	}

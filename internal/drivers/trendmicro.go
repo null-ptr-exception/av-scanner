@@ -169,11 +169,13 @@ func (d *TrendMicroDriver) ManualScan(filePath string) (*ScanResult, error) {
 	startTime := time.Now()
 	fileID := filepath.Base(filePath)
 
-	// dsa_scan --target <file> --json
+	// dsa_scan prints its own error lines on stdout, ahead of the JSON result.
+	// --log /dev/stderr sends the JSON to stderr instead, so the two never mix
+	// (verified on agents 20.0.2 and 20.0.3; /dev/fd/3 crashes dsa_scan).
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(d.config.Timeout)*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, d.config.ScanBinaryPath, "--target", filePath, "--json")
+	cmd := exec.CommandContext(ctx, d.config.ScanBinaryPath, "--target", filePath, "--json", "--log", "/dev/stderr")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -190,10 +192,11 @@ func (d *TrendMicroDriver) ManualScan(filePath string) (*ScanResult, error) {
 		}
 	}
 
-	output := stdout.String()
-	d.logger.Debug("Manual scan completed", "exitCode", exitCode, "output", output)
+	result := stderr.String()
+	diag := strings.TrimSpace(stdout.String())
+	d.logger.Debug("Manual scan completed", "exitCode", exitCode, "result", result, "diag", diag)
 
-	status, signature := d.parseManualScanOutput(output, exitCode)
+	status, signature := d.parseManualScanOutput(result, exitCode, diag)
 
 	return &ScanResult{
 		Status:    status,
@@ -206,14 +209,21 @@ func (d *TrendMicroDriver) ManualScan(filePath string) (*ScanResult, error) {
 		Duration:  time.Since(startTime).Milliseconds(),
 		Raw: map[string]interface{}{
 			"exitCode": exitCode,
-			"stdout":   output,
-			"stderr":   stderr.String(),
+			"stdout":   diag,
+			"stderr":   result,
 		},
 	}, nil
 }
 
-func (d *TrendMicroDriver) parseManualScanOutput(output string, exitCode int) (ScanStatus, string) {
-	// Try JSON parsing first (dsa_scan --json output format)
+// parseManualScanOutput turns dsa_scan's exit code and JSON result into a
+// verdict. It never reports clean unless the scan definitively finished clean.
+// diag is dsa_scan's own log output, used only for diagnostics.
+//
+// Exit codes: 0 clean, 1 malware found, 2 files skipped, 3 malware found and
+// files skipped; anything else (248 busy, 249 not permitted, 253 agent
+// unreachable, ...) is an error. On 253 the JSON still says "errorCode":0, so
+// the exit code must be checked, not only the JSON.
+func (d *TrendMicroDriver) parseManualScanOutput(result string, exitCode int, diag string) (ScanStatus, string) {
 	var jsonResult struct {
 		TraceID           string  `json:"traceID"`
 		NumOfFileScanned  int     `json:"numOfFileScanned"`
@@ -227,51 +237,33 @@ func (d *TrendMicroDriver) parseManualScanOutput(output string, exitCode int) (S
 		} `json:"infectedFiles"`
 	}
 
-	if err := json.Unmarshal([]byte(output), &jsonResult); err != nil {
-		// Unparseable output: never report clean. Keyword match still fails closed as infected.
-		lowerOutput := strings.ToLower(output)
-		if strings.Contains(lowerOutput, "infected") ||
-			strings.Contains(lowerOutput, "virus") ||
-			strings.Contains(lowerOutput, "malware") {
-			d.logger.Warn("Unparseable scanner output matched infection keyword, reporting infected",
-				"exitCode", exitCode, "output", output)
-			return StatusInfected, ""
-		}
-		d.logger.Warn("Unparseable scanner output", "exitCode", exitCode, "error", err)
+	if err := json.Unmarshal([]byte(result), &jsonResult); err != nil {
+		d.logger.Warn("Unparseable scanner result",
+			"exitCode", exitCode, "error", err, "result", result, "diag", diag)
 		return StatusError, ""
 	}
 
-	// Check for infected files first, so a detection is never masked by an error
-	if jsonResult.NumOfFileInfected > 0 || len(jsonResult.InfectedFiles) > 0 {
+	// A detection is never masked by an error
+	if jsonResult.NumOfFileInfected > 0 || len(jsonResult.InfectedFiles) > 0 || exitCode == 1 || exitCode == 3 {
 		signature := ""
 		if len(jsonResult.InfectedFiles) > 0 {
 			signature = jsonResult.InfectedFiles[0].MalwareName
 		}
 		if signature == "" {
-			d.logger.Warn("Infected without a malware name in scanner output",
-				"exitCode", exitCode, "output", output)
+			d.logger.Warn("Infected without a malware name in scanner result",
+				"exitCode", exitCode, "result", result, "diag", diag)
 		}
 		return StatusInfected, signature
 	}
 
-	if jsonResult.ErrorCode != 0 {
-		d.logger.Warn("Scanner reported error", "errorCode", jsonResult.ErrorCode, "exitCode", exitCode)
+	if exitCode != 0 || jsonResult.ErrorCode != 0 || jsonResult.NumOfFileSkipped > 0 || jsonResult.NumOfFileScanned == 0 {
+		d.logger.Warn("Scanner returned no verdict",
+			"exitCode", exitCode, "errorCode", jsonResult.ErrorCode,
+			"scanned", jsonResult.NumOfFileScanned, "skipped", jsonResult.NumOfFileSkipped, "diag", diag)
 		return StatusError, ""
 	}
 
-	// Check if file was skipped (not actually scanned)
-	if jsonResult.NumOfFileSkipped > 0 {
-		d.logger.Warn("File was skipped by scanner", "skipped", jsonResult.NumOfFileSkipped)
-		return StatusError, ""
-	}
-
-	// File was scanned and is clean
-	if jsonResult.NumOfFileScanned > 0 {
-		return StatusClean, ""
-	}
-
-	// No files scanned, treat as error
-	return StatusError, ""
+	return StatusClean, ""
 }
 
 func (d *TrendMicroDriver) CheckHealth() (*EngineHealth, error) {
