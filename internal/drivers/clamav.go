@@ -200,8 +200,12 @@ func (d *ClamAVDriver) ManualScan(filePath string) (*ScanResult, error) {
 			status = StatusClean
 		case 1:
 			status = StatusInfected
+			d.logger.Warn("Infected without a signature in scanner output",
+				"exitCode", exitCode, "output", output, "stderr", strings.TrimSpace(stderr.String()))
 		default:
 			status = StatusError
+			d.logger.Warn("Scanner error",
+				"exitCode", exitCode, "output", output, "stderr", strings.TrimSpace(stderr.String()))
 		}
 	}
 
