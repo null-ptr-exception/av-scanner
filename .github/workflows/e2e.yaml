@@ -109,6 +109,10 @@ jobs:
           path: test-results/*.xml
           reporter: java-junit
 
+      - name: Collect VM logs
+        if: failure()
+        run: ./scripts/e2e-logs.sh
+
       # Agent billing runs while the VM is on. On failure it stays up for debugging;
       # the next run reverts it to tm-base either way.
       - name: Shut down Trend Micro VM

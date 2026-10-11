@@ -68,6 +68,10 @@ To build the Trend Micro VM (once per host), from a checkout that CI does not wi
 3. In the console, make sure the endpoint uses a policy with Anti-Malware on and "Allow agent to trigger or cancel a manual scan" enabled (Anti-Malware → General). Otherwise `dsa_scan` exits 251 or 249.
 4. When `sudo /opt/ds_agent/dsa_scan --target <file> --json` exits 0, snapshot it: `source scripts/lib/virsh.sh && virsh_snapshot_create e2e-tm tm-base`.
 
+### Debugging a failed e2e run
+
+`./scripts/e2e-logs.sh` prints the av-scanner journal and the engine logs from each e2e VM (clamd/clamonacc, or the Trend Micro agent's `ds_am.log`). CI runs it automatically when the e2e job fails, before the VMs are destroyed. Set `E2E_TM_VM` as for the tests.
+
 ### Running molecule interactively
 
 ```bash
