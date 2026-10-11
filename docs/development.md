@@ -54,7 +54,7 @@ Use the same `E2E_TM_VM` for `make env` and `make test-e2e`, and run `make clean
 | `10_clamav.bats` | ClamAV only: `Heuristics.Limits.Exceeded` for an over-limit archive |
 | `11_trendmicro.bats` | Trend Micro only (skipped without `E2E_TM_VM`): `dsa_scan` allowed, RTS log path, detections logged in `ds_am.log` |
 
-The Trend Micro VM is never created or destroyed by `make`, CI or the tests, since it needs a registered agent. `scripts/tm-vm.sh prepare [--revert]` reverts it to its `tm-base` snapshot, authorizes `.vms/id_ed25519` on it, and waits until `dsa_scan` works.
+The Trend Micro VM is never created or destroyed by `make`, CI or the tests, since it needs a registered agent. `scripts/tm-vm.sh prepare [--revert]` boots it or reverts it to its `tm-base` snapshot, authorizes `.vms/id_ed25519` on it, and waits until `dsa_scan` works. `scripts/tm-vm.sh stop` shuts it down. The agent is billed while the VM is on, so CI stops it after a successful run and leaves it up after a failure for debugging.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
