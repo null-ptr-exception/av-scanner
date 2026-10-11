@@ -22,9 +22,15 @@
       register: clamonacc
       failed_when: clamonacc.status.ActiveState != "active"
 
-    - name: On-access config is present in clamd.conf
-      command: grep -q "OnAccessMountPath /tmp/av-scanner" /etc/clamav/clamd.conf
+    - name: On-access scanning watches only the scan directory
+      command: grep -q "^OnAccessIncludePath /tmp/av-scanner$" /etc/clamav/clamd.conf
       changed_when: false
+
+    - name: On-access scanning does not watch a whole mount
+      command: grep -q "^OnAccessMountPath" /etc/clamav/clamd.conf
+      register: mountpath
+      changed_when: false
+      failed_when: mountpath.rc == 0
 
     - name: OnAccessPrevention is enabled
       command: grep -q "OnAccessPrevention yes" /etc/clamav/clamd.conf

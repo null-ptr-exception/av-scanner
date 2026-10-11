@@ -41,8 +41,10 @@
   blockinfile:
     path: /etc/clamav/clamd.conf
     marker: "# {mark} ANSIBLE MANAGED - On-Access Scanning"
+    # IncludePath watches only scan_dir. MountPath would watch the whole filesystem
+    # scan_dir is on, flood clamd with system files, and disable prevention.
     block: |
-      OnAccessMountPath {{ scan_dir }}
+      OnAccessIncludePath {{ scan_dir }}
       OnAccessExcludeUname clamav
       OnAccessPrevention yes
       LogTime yes
