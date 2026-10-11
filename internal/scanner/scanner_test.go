@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rophy/av-scanner/internal/cache"
 	"github.com/rophy/av-scanner/internal/config"
@@ -212,13 +213,22 @@ func TestScanner_GetUploadPath(t *testing.T) {
 	}
 }
 
-// errorDriver is a driver whose manual scan never reaches a verdict.
+// errorDriver is a driver whose manual scan never reaches a verdict. Its
+// real-time detections come from the scanner's detection cache.
 type errorDriver struct {
 	*drivers.MockDriver
+	cache *cache.DetectionCache
 }
 
+// errorDriverTimeout is the scan budget left for waiting on a real-time detection
+const errorDriverTimeout = 300
+
 func (d *errorDriver) Config() config.DriverConfig {
-	return config.DriverConfig{Engine: config.EngineMock, RTSCacheBaseDelay: 50}
+	return config.DriverConfig{Engine: config.EngineMock, Timeout: errorDriverTimeout}
+}
+
+func (d *errorDriver) RTSWatch(filePath string, opts drivers.WatchOptions) (*drivers.ScanResult, error) {
+	return drivers.WatchRTS(d.cache, config.EngineMock, filePath, opts)
 }
 
 func (d *errorDriver) ManualScan(filePath string) (*drivers.ScanResult, error) {
@@ -228,7 +238,7 @@ func (d *errorDriver) ManualScan(filePath string) (*drivers.ScanResult, error) {
 func newErrorDriverScanner(t *testing.T) (*Scanner, string) {
 	t.Helper()
 	s, tmpDir := newTestScanner(t)
-	s.drivers[config.EngineMock] = &errorDriver{drivers.NewMockDriver(config.DriverConfig{Engine: config.EngineMock})}
+	s.drivers[config.EngineMock] = &errorDriver{drivers.NewMockDriver(config.DriverConfig{Engine: config.EngineMock}), s.detectionCache}
 	return s, tmpDir
 }
 
@@ -267,5 +277,48 @@ func TestScanner_EngineErrorUsesRTSDetection(t *testing.T) {
 	}
 	if result.Signature != "rts-sig" {
 		t.Errorf("expected signature rts-sig, got %s", result.Signature)
+	}
+}
+
+func TestScanner_EngineErrorWaitsForLateRTSDetection(t *testing.T) {
+	s, tmpDir := newErrorDriverScanner(t)
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(filePath, []byte("Hello, World!"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+	absPath, _ := filepath.Abs(filePath)
+	// The detection arrives well after the old fixed 50ms wait, within the budget
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		s.detectionCache.Add(absPath, &cache.Detection{FilePath: filePath, Status: "infected", Signature: "late-sig"})
+	}()
+
+	result, err := s.Scan(filePath, "test-id", "test.txt", 13)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != drivers.StatusInfected || result.Signature != "late-sig" {
+		t.Errorf("expected infected/late-sig, got %s/%s", result.Status, result.Signature)
+	}
+}
+
+func TestScanner_EngineErrorWithoutRTSDetectionFailsAfterBudget(t *testing.T) {
+	s, tmpDir := newErrorDriverScanner(t)
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(filePath, []byte("Hello, World!"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	start := time.Now()
+	result, err := s.Scan(filePath, "test-id", "test.txt", 13)
+	if err == nil {
+		t.Fatalf("expected scan error, got status %s", result.Status)
+	}
+	if elapsed := time.Since(start); elapsed < errorDriverTimeout*time.Millisecond*9/10 {
+		t.Errorf("expected to wait about the %dms budget, returned after %v", errorDriverTimeout, elapsed)
 	}
 }

@@ -10,9 +10,7 @@ func TestLoad_Defaults(t *testing.T) {
 	envVars := []string{
 		"PORT", "UPLOAD_DIR", "MAX_FILE_SIZE", "AV_ENGINE", "LOG_LEVEL",
 		"CLAMAV_RTS_LOG_PATH", "CLAMAV_SCAN_BINARY", "CLAMAV_TIMEOUT",
-		"CLAMAV_RTS_CACHE_BASE_DELAY", "CLAMAV_RTS_CACHE_DELAY_PER_MB",
 		"TM_RTS_LOG_PATH", "TM_SCAN_BINARY", "TM_TIMEOUT",
-		"TM_RTS_CACHE_BASE_DELAY", "TM_RTS_CACHE_DELAY_PER_MB",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -51,12 +49,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if clamav.Timeout != 15000 {
 		t.Errorf("expected ClamAV Timeout 15000, got %d", clamav.Timeout)
 	}
-	if clamav.RTSCacheBaseDelay != 500 {
-		t.Errorf("expected ClamAV RTSCacheBaseDelay 500, got %d", clamav.RTSCacheBaseDelay)
-	}
-	if clamav.RTSCacheDelayPerMB != 10 {
-		t.Errorf("expected ClamAV RTSCacheDelayPerMB 10, got %d", clamav.RTSCacheDelayPerMB)
-	}
 
 	// Check TrendMicro driver defaults
 	tm := cfg.Drivers[EngineTrendMicro]
@@ -76,7 +68,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("AV_ENGINE", "trendmicro")
 	os.Setenv("LOG_LEVEL", "debug")
 	os.Setenv("CLAMAV_TIMEOUT", "30000")
-	os.Setenv("TM_RTS_CACHE_BASE_DELAY", "1000")
+	os.Setenv("TM_TIMEOUT", "20000")
 
 	defer func() {
 		os.Unsetenv("PORT")
@@ -85,7 +77,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("AV_ENGINE")
 		os.Unsetenv("LOG_LEVEL")
 		os.Unsetenv("CLAMAV_TIMEOUT")
-		os.Unsetenv("TM_RTS_CACHE_BASE_DELAY")
+		os.Unsetenv("TM_TIMEOUT")
 	}()
 
 	cfg, err := Load()
@@ -111,8 +103,8 @@ func TestLoad_CustomValues(t *testing.T) {
 	if cfg.Drivers[EngineClamAV].Timeout != 30000 {
 		t.Errorf("expected ClamAV Timeout 30000, got %d", cfg.Drivers[EngineClamAV].Timeout)
 	}
-	if cfg.Drivers[EngineTrendMicro].RTSCacheBaseDelay != 1000 {
-		t.Errorf("expected TM RTSCacheBaseDelay 1000, got %d", cfg.Drivers[EngineTrendMicro].RTSCacheBaseDelay)
+	if cfg.Drivers[EngineTrendMicro].Timeout != 20000 {
+		t.Errorf("expected TM Timeout 20000, got %d", cfg.Drivers[EngineTrendMicro].Timeout)
 	}
 }
 

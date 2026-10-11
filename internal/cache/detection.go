@@ -25,6 +25,7 @@ type DetectionCache struct {
 	mu         sync.RWMutex
 	ttl        time.Duration
 	stopCh     chan struct{}
+	added      chan struct{} // closed and replaced on every Add, to wake waiters
 }
 
 func NewDetectionCache(ttl time.Duration) *DetectionCache {
@@ -35,6 +36,7 @@ func NewDetectionCache(ttl time.Duration) *DetectionCache {
 		detections: make(map[string]*Detection),
 		ttl:        ttl,
 		stopCh:     make(chan struct{}),
+		added:      make(chan struct{}),
 	}
 	go c.cleanupLoop()
 	return c
@@ -45,7 +47,32 @@ func (c *DetectionCache) Add(absPath string, detection *Detection) {
 	c.mu.Lock()
 	detection.Timestamp = time.Now()
 	c.detections[absPath] = detection
+	close(c.added)
+	c.added = make(chan struct{})
 	c.mu.Unlock()
+}
+
+// Wait returns and removes the detection for absPath, waiting up to timeout
+// for one to be added. It returns false if none arrives in time.
+func (c *DetectionCache) Wait(absPath string, timeout time.Duration) (*Detection, bool) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		c.mu.Lock()
+		if cached, found := c.detections[absPath]; found {
+			delete(c.detections, absPath)
+			c.mu.Unlock()
+			return cached, true
+		}
+		added := c.added
+		c.mu.Unlock()
+
+		select {
+		case <-added:
+		case <-timer.C:
+			return nil, false
+		}
+	}
 }
 
 // Get retrieves and removes a detection from the cache
