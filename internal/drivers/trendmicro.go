@@ -227,13 +227,14 @@ func (d *TrendMicroDriver) ManualScan(filePath string) (*ScanResult, error) {
 // unreachable, ...) is an error. On 253 the JSON still says "errorCode":0, so
 // the exit code must be checked, not only the JSON.
 func (d *TrendMicroDriver) parseManualScanOutput(result string, exitCode int, diag string) (ScanStatus, string) {
+	// Pointers tell a missing field from a zero: a clean verdict needs all four
 	var jsonResult struct {
 		TraceID           string  `json:"traceID"`
-		NumOfFileScanned  int     `json:"numOfFileScanned"`
-		NumOfFileSkipped  int     `json:"numOfFileSkipped"`
-		NumOfFileInfected int     `json:"numOfFileInfected"`
+		NumOfFileScanned  *int    `json:"numOfFileScanned"`
+		NumOfFileSkipped  *int    `json:"numOfFileSkipped"`
+		NumOfFileInfected *int    `json:"numOfFileInfected"`
 		TimeElapse        float64 `json:"timeElapse"`
-		ErrorCode         int     `json:"errorCode"`
+		ErrorCode         *int    `json:"errorCode"`
 		InfectedFiles     []struct {
 			FileName    string `json:"fileName"`
 			MalwareName string `json:"malwareName"`
@@ -246,8 +247,17 @@ func (d *TrendMicroDriver) parseManualScanOutput(result string, exitCode int, di
 		return StatusError, ""
 	}
 
+	val := func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
+	scanned, skipped, infected, errorCode := val(jsonResult.NumOfFileScanned), val(jsonResult.NumOfFileSkipped),
+		val(jsonResult.NumOfFileInfected), val(jsonResult.ErrorCode)
+
 	// A detection is never masked by an error
-	if jsonResult.NumOfFileInfected > 0 || len(jsonResult.InfectedFiles) > 0 || exitCode == 1 || exitCode == 3 {
+	if infected > 0 || len(jsonResult.InfectedFiles) > 0 || exitCode == 1 || exitCode == 3 {
 		signature := ""
 		if len(jsonResult.InfectedFiles) > 0 {
 			signature = jsonResult.InfectedFiles[0].MalwareName
@@ -259,10 +269,12 @@ func (d *TrendMicroDriver) parseManualScanOutput(result string, exitCode int, di
 		return StatusInfected, signature
 	}
 
-	if exitCode != 0 || jsonResult.ErrorCode != 0 || jsonResult.NumOfFileSkipped > 0 || jsonResult.NumOfFileScanned == 0 {
+	complete := jsonResult.NumOfFileScanned != nil && jsonResult.NumOfFileSkipped != nil &&
+		jsonResult.NumOfFileInfected != nil && jsonResult.ErrorCode != nil
+	if !complete || exitCode != 0 || errorCode != 0 || skipped > 0 || scanned == 0 {
 		d.logger.Warn("Scanner returned no verdict",
-			"exitCode", exitCode, "errorCode", jsonResult.ErrorCode,
-			"scanned", jsonResult.NumOfFileScanned, "skipped", jsonResult.NumOfFileSkipped, "diag", diag)
+			"exitCode", exitCode, "errorCode", errorCode, "scanned", scanned, "skipped", skipped,
+			"complete", complete, "result", result, "diag", diag)
 		return StatusError, ""
 	}
 

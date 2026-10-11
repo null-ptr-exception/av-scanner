@@ -21,6 +21,7 @@
 #   PERF_RATES    sweep rates in scans/s (default: "1 2 4 8 16 32 64 128")
 #   PERF_P95_MS   latency limit for the sweep result (default: 1000)
 #   AUTH_TOKEN    bearer token, if the VM has auth enabled
+#   PERF_SSH_KEY  key for the VM's CPU sampling (default: .vms/id_ed25519)
 
 set -euo pipefail
 
@@ -32,7 +33,7 @@ MODE="${1:-load}"
 PERF_VM="${PERF_VM:-e2e-1}"
 PERF_RATES="${PERF_RATES:-1 2 4 8 16 32 64 128}"
 PERF_P95_MS="${PERF_P95_MS:-1000}"
-SSH_KEY="${PROJECT_ROOT}/.vms/id_ed25519"
+SSH_KEY="${PERF_SSH_KEY:-${PROJECT_ROOT}/.vms/id_ed25519}"
 
 case "$MODE" in
     load|sweep) ;;
@@ -115,6 +116,6 @@ for rate in $PERF_RATES; do
 done
 
 printf '%s\n' "${results[@]}" | jq -rs --argjson lim "$PERF_P95_MS" '
-    map(select(.p95 <= $lim and .failed == 0 and .mismatches == 0)) | max_by(.achieved)
-    | if . then "Saturation (p95 <= \($lim)ms): \(.achieved*100|round/100) scans/s at offered \(.rate)/s, p95 \(.p95|round)ms, VM CPU \(.cpu)%"
+    map(select(.p95 <= $lim and .failed == 0 and .mismatches == 0 and .dropped == 0)) | max_by(.achieved)
+    | if . then "Saturation (p95 <= \($lim)ms, no errors or drops): \(.achieved*100|round/100) scans/s at offered \(.rate)/s, p95 \(.p95|round)ms, VM CPU \(.cpu)%"
       else "No rate met p95 <= \($lim)ms without errors" end'

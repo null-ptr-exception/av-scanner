@@ -21,7 +21,7 @@ So batching is about 4–20× cheaper per file.
 - Run one `dsa_scan --target <dir> --json --log /dev/stderr` per batch.
 - Map results back to each upload by file name:
   - **Clean:** only when the batch scanned every file, skipped none, found no infection and exited 0.
-  - **Infected:** only the files listed in `infectedFiles`.
+  - **Infected:** only the files listed in `infectedFiles`. If the batch reports an infection (exit 1 or 3, or a count) without naming every infected file, fail the whole batch closed or rescan its files one by one.
   - **Skipped files or errors:** the JSON does not say which file was skipped, so fail the whole batch, or rescan its files one by one. Never assume clean.
 - Trade-off: each upload waits up to one batching window longer.
 

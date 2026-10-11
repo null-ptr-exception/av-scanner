@@ -78,7 +78,7 @@ make test-perf PERF_MODE=sweep                    # fixed scans/s steps until p9
 make test-perf PERF_MODE=sweep PERF_VM=e2e-tm     # the same against the Trend Micro VM
 ```
 
-Each step also reports the VM's CPU use. Set `AUTH_TOKEN` when the VM has auth enabled (the e2e deploy does; `make deploy` does not). `PERF_RATES` and `PERF_P95_MS` change the steps and the latency limit. Needs `k6`, `python3` and `jq`.
+Each step also reports the VM's CPU use. Set `AUTH_TOKEN` when the VM has auth enabled (the e2e deploy does; `make deploy` does not). `PERF_RATES` and `PERF_P95_MS` change the steps and the latency limit. `PERF_SSH_KEY` sets the key for CPU sampling when the VM was built with another key. Steps where k6 dropped requests never count toward the reported maximum. Needs `k6`, `python3` and `jq`.
 
 ### Debugging a failed e2e run
 

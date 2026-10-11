@@ -175,6 +175,16 @@ func TestParseManualScanOutput(t *testing.T) {
 			wantStatus: StatusError,
 		},
 		{
+			name:       "clean-looking result missing fields is error",
+			result:     `{"numOfFileScanned":1}`,
+			wantStatus: StatusError,
+		},
+		{
+			name:       "clean-looking result missing errorCode is error",
+			result:     `{"numOfFileScanned":1,"numOfFileSkipped":0,"numOfFileInfected":0}`,
+			wantStatus: StatusError,
+		},
+		{
 			name:       "nothing scanned is error",
 			result:     `{}`,
 			wantStatus: StatusError,
