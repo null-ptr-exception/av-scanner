@@ -60,7 +60,6 @@ The Trend Micro VM is never created or destroyed by `make`, CI or the tests, sin
 |----------|---------|---------|
 | `E2E_TM_VM` | (unset) | libvirt name of the Trend Micro VM; unset means ClamAV only |
 | `E2E_TM_SSH_KEY` | `.vms/id_ed25519` | Key the VM was built with, if it was built from another checkout |
-| `TM_RTS_LOG_PATH` | `/var/opt/ds_agent/diag/ds_am.log` | Agent log with RTS detections (agent 20.x) |
 
 To build the Trend Micro VM (once per host), from a checkout that CI does not wipe. It needs a Trend Vision One account with Server & Workload Protection (a trial works):
 

@@ -61,7 +61,7 @@ func Load() (*Config, error) {
 			},
 			EngineTrendMicro: {
 				Engine:             EngineTrendMicro,
-				RTSLogPath:         getEnv("TM_RTS_LOG_PATH", "/var/log/ds_agent/ds_agent.log"),
+				RTSLogPath:         getEnv("TM_RTS_LOG_PATH", "/var/opt/ds_agent/diag/ds_am.log"),
 				ScanBinaryPath:     getEnv("TM_SCAN_BINARY", "/opt/ds_agent/dsa_scan"),
 				Timeout:            getEnvInt("TM_TIMEOUT", 15000),
 				RTSCacheBaseDelay:  getEnvInt("TM_RTS_CACHE_BASE_DELAY", 500),

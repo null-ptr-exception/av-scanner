@@ -5,7 +5,8 @@ scan_dir: /tmp/av-scanner
 av_scanner_port: 3000
 log_level: info
 clamav_rts_log_path: /var/log/clamav/clamonacc.log
-tm_rts_log_path: /var/log/ds_agent/ds_agent.log
+# Verified on agent 20.0.3-28120 (Ubuntu 22.04); older agents may log elsewhere
+tm_rts_log_path: /var/opt/ds_agent/diag/ds_am.log
 k8s_auth_token_path: /etc/av-scanner/sa-token
 node_exporter_version: "1.9.0"
 node_exporter_port: 9100

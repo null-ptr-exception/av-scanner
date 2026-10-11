@@ -160,7 +160,7 @@ inventory: |
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `clamav_rts_log_path` | /var/log/clamav/clamonacc.log | ClamAV real-time scan log |
-| `tm_rts_log_path` | /var/log/ds_agent/ds_agent.log | TrendMicro DS Agent log |
+| `tm_rts_log_path` | /var/opt/ds_agent/diag/ds_am.log | Trend Micro agent log with real-time detections |
 | `clamav_max_file_size` | 100M | clamd `MaxFileSize` |
 | `clamav_max_scan_size` | 400M | clamd `MaxScanSize` (total data scanned per file, incl. archive contents) |
 
@@ -183,7 +183,13 @@ echo ok > /tmp/check.txt && sudo /opt/ds_agent/dsa_scan --target /tmp/check.txt 
 
 Exit 251 means Anti-Malware is off, and 249 means the policy does not allow agent-triggered scans. In either case av-scanner gets no verdict and fails closed: scans come back as errors, or as infected even for clean files.
 
-Set `tm_rts_log_path` to the file where your agent logs real-time detections. It depends on the agent version: agent 20.x (Vision One Server & Workload Protection) logs to `/var/opt/ds_agent/diag/ds_am.log`.
+`tm_rts_log_path` must point to the file where the agent logs real-time detections. The default was verified on agent 20.0.3-28120 (Ubuntu 22.04); the location depends on the agent version, so check it after an agent upgrade. To find it, look for detection lines (`virus found`) on a VM where the agent has caught something:
+
+```bash
+sudo grep -rlaF 'virus found' /var/opt/ds_agent/ /var/log/
+```
+
+If the path is wrong, the service still scans on demand, but its health check reports `RTS log not accessible` and real-time detections are missed.
 
 #### Authentication
 
