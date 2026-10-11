@@ -168,6 +168,23 @@ ClamAV is configured with `AlertExceedsMax` and `AlertEncrypted`, so a file it c
 
 Known gap (ClamAV 1.5.4, verified): a single *deflated zip member* that inflates past `MaxFileSize` is skipped without an alert, so its contents are not scanned. Gzip/tar.gz, stored zips and other members of the same zip are handled correctly.
 
+#### Trend Micro agent prerequisites
+
+With `av_engine: trendmicro`, the role installs and configures av-scanner only. The Trend Micro agent (`ds_agent`) must already be installed and activated on each VM, and its policy must allow av-scanner's on-demand scans:
+
+- Anti-Malware is on.
+- "Allow agent to trigger or cancel a manual scan" is enabled (policy → Anti-Malware → General).
+
+Check on each VM before deploying. This must exit 0:
+
+```bash
+echo ok > /tmp/check.txt && sudo /opt/ds_agent/dsa_scan --target /tmp/check.txt --json; echo "exit=$?"
+```
+
+Exit 251 means Anti-Malware is off, and 249 means the policy does not allow agent-triggered scans. In either case av-scanner gets no verdict and fails closed: scans come back as errors, or as infected even for clean files.
+
+Set `tm_rts_log_path` to the file where your agent logs real-time detections. It depends on the agent version: agent 20.x (Vision One Server & Workload Protection) logs to `/var/opt/ds_agent/diag/ds_am.log`.
+
 #### Authentication
 
 | Variable | Default | Description |

@@ -17,25 +17,14 @@ setup_file() {
     _e2e_init
     local ssh_key="${project_root}/.vms/id_ed25519"
 
-    # --- Revert VMs to clean-base snapshot (truly clean state) ---
-    for name in e2e-1 e2e-2; do
-        echo "# Reverting $name to clean-base snapshot..."
-        virsh_snapshot_revert "$name" "clean-base"
-    done
-
-    # --- Wait for VMs after revert ---
-    for name in e2e-1 e2e-2; do
-        local vm_ip
-        vm_ip=$(virsh_wait_ip "$name")
-        echo "# Waiting for SSH on $name ($vm_ip)..."
-        virsh_wait_ssh "$vm_ip" "$ssh_key"
-    done
+    # --- Revert VMs to base snapshots (truly clean state) ---
+    e2e_vm_revert
 
     # --- Re-discover VM IPs ---
-    export E2E_VM1_IP=$(virsh_get_ip "e2e-1")
-    export E2E_VM2_IP=$(virsh_get_ip "e2e-2")
+    export E2E_VM1_IP=$(virsh_get_ip "$E2E_VM1_NAME")
+    export E2E_VM2_IP=$(virsh_get_ip "$E2E_VM2_NAME")
     export E2E_SSH_KEY="$ssh_key"
-    echo "# VMs reverted: e2e-1=${E2E_VM1_IP}, e2e-2=${E2E_VM2_IP}"
+    echo "# VMs reverted: ${E2E_VM1_NAME}=${E2E_VM1_IP} (${E2E_VM1_ENGINE}), ${E2E_VM2_NAME}=${E2E_VM2_IP} (${E2E_VM2_ENGINE})"
 
     export MINIKUBE_PROFILE="av-scanner"
     export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
@@ -61,8 +50,8 @@ setup() {
     _e2e_init
     export MINIKUBE_PROFILE="av-scanner"
     export KUBE_CONTEXT="${MINIKUBE_PROFILE}"
-    export E2E_VM1_IP="${E2E_VM1_IP:-$(virsh_get_ip e2e-1)}"
-    export E2E_VM2_IP="${E2E_VM2_IP:-$(virsh_get_ip e2e-2)}"
+    export E2E_VM1_IP="${E2E_VM1_IP:-$(virsh_get_ip "$E2E_VM1_NAME")}"
+    export E2E_VM2_IP="${E2E_VM2_IP:-$(virsh_get_ip "$E2E_VM2_NAME")}"
     export E2E_SSH_KEY="${E2E_SSH_KEY:-$(get_project_root)/.vms/id_ed25519}"
 }
 
@@ -95,6 +84,14 @@ setup() {
             echo "ERROR: av-scanner not active on ${vm_ip}, got: ${result}"; false
         }
     done
+}
+
+@test "post-install: each VM runs its configured engine" {
+    local unit
+    unit=$(vm_ssh "$E2E_VM1_IP" "systemctl cat av-scanner")
+    echo "$unit" | grep -Fq "AV_ENGINE=${E2E_VM1_ENGINE}" || { echo "ERROR: vm1 is not ${E2E_VM1_ENGINE}"; false; }
+    unit=$(vm_ssh "$E2E_VM2_IP" "systemctl cat av-scanner")
+    echo "$unit" | grep -Fq "AV_ENGINE=${E2E_VM2_ENGINE}" || { echo "ERROR: vm2 is not ${E2E_VM2_ENGINE}"; false; }
 }
 
 @test "post-install: health endpoint responds on both VMs" {

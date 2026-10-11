@@ -4,7 +4,8 @@
 # Runs once before any test file and once after all test files complete.
 # Handles VM snapshot management and e2e values file generation.
 #
-# Prerequisites: make env (VMs, minikube, Istio, kfa, SSH secret, skaffold-values.yaml)
+# Prerequisites: make env (VMs, minikube, Istio, kfa, SSH secret, skaffold-values.yaml),
+# and the pre-installed Trend Micro VM if E2E_TM_VM is set (see scripts/tm-vm.sh).
 
 setup_suite() {
     local project_root
@@ -13,47 +14,21 @@ setup_suite() {
     source "${project_root}/test/e2e/test_helper.bash"
     source "${project_root}/test/e2e/vm_helper.bash"
 
-    # --- VMs: revert to clean-base snapshot or create from scratch ---
+    # --- VMs: ClamAV VMs without a clean-base snapshot are created, then all reverted ---
     _e2e_init
-    local ssh_key="${project_root}/.vms/id_ed25519"
-
-    for name in e2e-1 e2e-2; do
-        if virsh_snapshot_exists "$name" "clean-base"; then
-            echo "# Reverting $name to clean-base snapshot..."
-            virsh_snapshot_revert "$name" "clean-base"
-        else
-            echo "# No snapshot for $name, destroying and recreating..."
-            virsh_destroy_vm "$name"
+    local name
+    for name in $(e2e_clamav_vms); do
+        if ! virsh_snapshot_exists "$name" "clean-base"; then
+            echo "# No snapshot for ${name}, creating from scratch..."
+            VM_MEMORY="${VM_MEMORY:-2048}" "${project_root}/scripts/vm-init.sh" --name "$name" --force
         fi
     done
-
-    # If VMs don't exist (no snapshot path), create them
-    local need_create=false
-    for name in e2e-1 e2e-2; do
-        if ! _virsh dominfo "$name" &>/dev/null; then
-            need_create=true
-            break
-        fi
-    done
-
-    if [[ "$need_create" == "true" ]]; then
-        echo "# Creating e2e VMs from scratch..."
-        VM_MEMORY="${VM_MEMORY:-2048}" "${project_root}/scripts/vm-init.sh" \
-            --name e2e --count 2 --force
-    fi
-
-    # Wait for VMs to be ready
-    for name in e2e-1 e2e-2; do
-        local vm_ip
-        vm_ip=$(virsh_wait_ip "$name")
-        echo "# Waiting for SSH on $name ($vm_ip)..."
-        virsh_wait_ssh "$vm_ip" "$ssh_key"
-    done
+    e2e_vm_revert
 
     # --- Generate .e2e-values.yaml for skaffold e2e profile ---
     local vm1_ip vm2_ip vm_gateway
-    vm1_ip=$(virsh_get_ip "e2e-1")
-    vm2_ip=$(virsh_get_ip "e2e-2")
+    vm1_ip=$(virsh_get_ip "$E2E_VM1_NAME")
+    vm2_ip=$(virsh_get_ip "$E2E_VM2_NAME")
     vm_gateway=$(ip -4 addr show virbr0 | grep -oP '(\d+\.){3}\d+' | head -1)
     local kfa_endpoint="http://${vm_gateway}:${KFA_PORT:-31082}"
 
@@ -87,6 +62,8 @@ inventory: |
           vm2:
             ansible_host: ${vm2_ip}
             ansible_user: ubuntu
+            av_engine: ${E2E_VM2_ENGINE}
+            tm_rts_log_path: ${TM_RTS_LOG_PATH:-/var/opt/ds_agent/diag/ds_am.log}
 
 istio:
   enabled: true
@@ -110,8 +87,7 @@ teardown_suite() {
 
         local project_root
         project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-        source "${project_root}/scripts/lib/virsh.sh"
-        virsh_destroy_vm "e2e-1"
-        virsh_destroy_vm "e2e-2"
+        source "${project_root}/test/e2e/vm_helper.bash"
+        e2e_vm_teardown
     fi
 }

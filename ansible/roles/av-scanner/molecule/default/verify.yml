@@ -3,8 +3,7 @@
   hosts: av_scanner
   become: true
   gather_facts: false
-  vars:
-    av_engine: "{{ lookup('env', 'MOLECULE_AV_ENGINE') | default('clamav', true) }}"
+  # av_engine comes from the molecule inventory (group default, per-host override)
   tasks:
     - name: av-scanner binary exists
       stat:

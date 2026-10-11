@@ -33,6 +33,8 @@ provisioner:
       vm2:
         ansible_host: ${AV_SCANNER_VM2_IP}
         ansible_user: ubuntu
+        av_engine: ${AV_SCANNER_VM2_AV_ENGINE:-clamav}
+        tm_rts_log_path: ${AV_SCANNER_VM2_TM_RTS_LOG_PATH:-/var/log/ds_agent/ds_agent.log}
         ansible_ssh_private_key_file: ${AV_SCANNER_SSH_KEY:-/ssh/id_ed25519}
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
